@@ -1,0 +1,16 @@
+{
+  "name": "x64dbg-rippy-ui",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  },
+  "dependencies": {
+    "dompurify": "^3.3.3",
+    "marked": "^17.0.4",
+    "preact": "^10.29.0"
+  }
+}

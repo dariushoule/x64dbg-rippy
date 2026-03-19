@@ -1,0 +1,33 @@
+#include <windows.h>
+#include "resource.h"
+
+IDR_CHAT_HTML RCDATA "chat_ui.html"
+IDR_TAB_ICON  RCDATA "../rc/tab-icon.png"
+IDR_COMMAND_REF RCDATA "../rc/x64dbg-command-ref.txt"
+
+IDD_SETTINGS DIALOGEX 0, 0, 310, 175
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "x64dbg-rippy Settings"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    GROUPBOX        "API Provider", IDC_GROUP_PROVIDER, 7, 7, 296, 30
+    CONTROL         "Anthropic", IDC_RADIO_ANTHROPIC, "Button", BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 14, 20, 55, 10
+    CONTROL         "OpenAI Compatible", IDC_RADIO_OPENAI, "Button", BS_AUTORADIOBUTTON | WS_TABSTOP, 80, 20, 85, 10
+
+    LTEXT           "API Key:", IDC_STATIC_APIKEY, 7, 47, 40, 8
+    EDITTEXT        IDC_EDIT_APIKEY, 60, 45, 243, 14, ES_AUTOHSCROLL | ES_PASSWORD
+
+    LTEXT           "Endpoint:", IDC_STATIC_ENDPOINT, 7, 67, 45, 8
+    EDITTEXT        IDC_EDIT_ENDPOINT, 60, 65, 243, 14, ES_AUTOHSCROLL
+
+    LTEXT           "Model:", IDC_STATIC_MODEL, 7, 87, 40, 8
+    EDITTEXT        IDC_EDIT_MODEL, 60, 85, 243, 14, ES_AUTOHSCROLL
+
+    LTEXT           "Rippy Dir:", IDC_STATIC_RIPPYDIR, 7, 107, 45, 8
+    EDITTEXT        IDC_EDIT_RIPPYDIR, 60, 105, 210, 14, ES_AUTOHSCROLL
+    PUSHBUTTON      "...", IDC_BTN_BROWSE, 274, 105, 29, 14
+
+    LTEXT           "Changes take effect on the next message.", IDC_STATIC_INFO, 7, 130, 180, 8
+    DEFPUSHBUTTON   "OK", IDOK, 199, 155, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 253, 155, 50, 14
+END

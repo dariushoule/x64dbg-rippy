@@ -1,0 +1,4777 @@
+# REFERENCE: Values
+# Values
+
+A lot of [commands](../commands/index.rst) accept [expressions](./Expressions.md) and values as arguments. Below is a list of all the value formats supported. You can play around with these by typing them in the command bar, or using the calculator (`Help -> Calculator` menu).
+
+## Numbers
+
+**All numbers are interpreted as hex by default!** If you want to be sure, you can `x` or `0x` as a prefix. Decimal numbers can be used by prefixing the number with a dot: `.123=7B`.
+
+## Variables
+
+Variables optionally start with a `$` and can only store one DWORD (QWORD on x64). This means that `myvar` and `$myvar` are equivalent. See the [variables](./Variables.md) section for more information.
+
+## Registers
+
+All registers of all sizes, except floating-point registers (eg: RAX, EAX, AL) can be used as variables.
+
+Floating-point registers like XMM0, YMM0, ZMM0, K0 or ST(0) may not be used as variables, but they may be logged via the [String Formatting](./Formatting.md) floating-point type. Commands [`movdqu`](../commands/general-purpose/movdqu.md), [`vmovdqu`](../commands/general-purpose/vmovdqu.md), [`kmovd`](../commands/general-purpose/kmovd.md) can also be used to access floating-point registers.
+
+### Remarks
+
+- The variable names for most registers are the same as the names for them, except for the following registers: 
+ - **x87 Control Word Flag**: The flags for this register is named like this: `_x87CW_UM`
+- In addition to the registers in the architecture, x64dbg provides the following registers: `CAX` , `CBX` , `CCX` , `CDX` , `CSP` , `CBP` , `CSI` , `CDI` , `CIP`. These registers are mapped to 32-bit registers on 32-bit platform, and to 64-bit registers on 64-bit platform. For example, `CIP` is `EIP` on 32-bit platform, and is `RIP` on 64-bit platform. This feature is intended to support architecture-independent code.
+
+## Flags
+
+Debug flags (interpreted as integer) can be used as input. Flags are prefixed with an `_` followed by the flag name. Valid flags are: `_cf`, `_pf`, `_af`, `_zf`, `_sf`, `_tf`, `_if`, `_df`, `_of`, `_rf`, `_vm`, `_ac`, `_vif`, `_vip` and `_id`.
+
+## Memory locations
+
+You can read/write from/to a memory location by using one of the following expressions:
+- `[addr]` read a DWORD/QWORD from `addr`.
+- `n:[addr]` read n bytes from `addr`.
+- `seg:[addr]` read a DWORD/QWORD from a segment at `addr`.
+- `byte:[addr]` read a BYTE from `addr`.
+- `word:[addr]` read a WORD from `addr`.
+- `dword:[addr]` read a DWORD from `addr`.
+- `qword:[addr]` read a QWORD from `addr` (x64 only).
+
+- `n` is the amount of bytes to read, this can be anything not greater than 4 on x32 and not greater than 8 on x64 when specified, otherwise there will be an error.
+- `seg` can be `gs`, `es`, `cs`, `fs`, `ds`, `ss`. Only `fs` and `gs` have an effect.
+
+Dereferencing an invalid address causes an error, which can be problematic for [conditional breakpoints](./ConditionalBreakpoint.md) or when scripting. You can use the `ReadByte(addr)` family of [expression functions](./Expression-functions.md) to return 0 on error instead.
+
+## Labels/Symbols
+
+User-defined labels and symbols are a valid expressions (they resolve to the address of said label/symbol).
+
+## Module Data
+
+### DLL exports
+
+Type `GetProcAddress` and it will automatically be resolved to the actual address of the function. To explicitly define from which module to load the API, use: `module.dll:api` or `module:api`. In a similar way you can resolve ordinals, try `module:ordinal`. Another macro allows you to get the loaded base of a module. When `module` is an empty string (`:myexport` for example), the module that is currently selected in the CPU will be used. Using a `.` instead of a `:` is equivalent.
+
+```
+ntdll.dll:ZwContinue
+ntdll:memcmp
+ntdll.memcmp // same as above
+ntdll:1D // Ordinal 0x1D
+:myexport // Export 'myexport' in the current module
+```
+
+Forwarded exports are resolved to their final address. To prevent this you can use a `?` instead of `:`.
+
+```
+kernel32:EnterCriticalSection // resolves to ntdll:RtlEnterCriticalSection
+kernel32?EnterCriticalSection // resolves to the export in kernel32
+```
+
+### Loaded module bases
+
+If you want to access the loaded module base, you can write: `module`, `module:0`, `module:base`, `module:imagebase` or `module:header`.
+
+### RVA/File offset
+
+If you want to access a module RVA you can either write `module + rva` or you can write `module:$rva`. If you want to convert a file offset to a VA you can use `module:#offset`. When `module` is an empty string (`:$123` for example), the module that is currently selected in the CPU will be used.
+
+```
+// File offset 0x400
+ntdll.dll:#400
+:#400
+// RVA 0x1000
+ntdll.dll:$1000 // RVA 0x1000
+:$1000
+```
+
+### Module entry points
+
+To access a module entry point you can write `module:entry`, `module:oep` or `module:ep`. Notice that when there are exports with the names `entry`, `oep` or `ep` the address of these will be returned instead.
+
+# REFERENCE: Expressions
+# Expressions
+
+The debugger allows usage of basic expressions. Apart from calculations, it allows variable assignment using a C-like syntax. You can play around with expressions by typing them in the command bar, or using the calculator (<span class="title-ref">Help -\> Calculator</span> menu).
+
+## Values
+
+All values can be used as constants in expressions, see [values](./Values.md) for more information and examples.
+
+**Warning: All numbers in expressions are interpreted as hex by default!** For decimal use `.123`.
+
+## Operators
+
+You can use the following operators in your expression. They are processed in the following order:
+
+1.  *parentheses/brackets*: `(1+2)`, `[1+6]` have priority over other operations.
+2.  *unary minus/binary not/logical not*: `-1` (negative 1), `~1` (binary not of 1), `!0` (logical not of 0).
+3.  *multiplication/division*: `2*3` (regular multiplication), `` 2`3 `` (gets high part of the multiplication), `6/3` (regular division), `5%3` (modulo/remainder of the division).
+4.  *addition/subtraction*: `1+3` (addition), `5-2` (subtraction).
+5.  *left/right shift/rotate*: `1<<2` (shift left, shl for unsigned, sal for signed), `10>>1` (shift right, shl for unsigned, sal for signed), `1<<<2` (rotate left), `1>>>2` (rotate right).
+6.  *smaller (equal)/bigger (equal)*: `4<10`, `3>6`, `1<=2`, `6>=7` (resolves to 1 if true, 0 if false).
+7.  *equal/not equal*: `1==1`, `2!=6` (resolves to 1 if true, 0 if false).
+8.  *binary and*: `12&2` (regular binary and).
+9.  *binary xor*: `2^1` (regular binary xor).
+10. *binary or*: `2|8` (regular binary or).
+11. *logical and*: `0&&3` (resolves to 1 if true, 0 if false).
+12. *logical or*: `0||3` (resolves to 1 if true, 0 if false).
+13. *logical implication*: `0->1` (resolved to 1 if true, 0 if false).
+
+## Quick-Assigning
+
+Changing memory, a variable, register or flag can be easily done using a C-like syntax:
+
+-   `a?=b` where `?` can be any non-logical operator. `a` can be any register, flag, variable or memory location. `b` can be anything that is recognized as an expression.
+-   `a++/a--` where `a` can be any register, flag, variable or memory location.
+
+## Functions
+
+You can use functions in expressions. See [expression functions](./Expression-functions.md) for the documentation of these functions.
+
+# REFERENCE: Expression-functions
+# Expression Functions
+
+You may use functions in an expression. The following functions are defined by the debugger:
+
+## Strings
+
+- `utf8(addr[, count])`: Reads a null-terminated UTF-8 string from `addr` and returns the string value. When a `count` is specified the string will be truncated.
+- `utf16(addr[, count])`: Reads a null-terminated UTF-16 string from `addr` and returns the string value. When a `count` is specified the string will be truncated.
+- `ansi(addr[, count])`: Reads a null-terminated ANSI string from `addr` and returns the string value. When a `count` is specified the string will be truncated.
+- `strstr(str1, str2)`: Find a substring. Example: `strstr(utf8(addr), "abc")`.
+- `stristr(str1, str2)`: Find a substring (case insensitive).
+- `streq(str1, str2)`: Compare two strings. Example: `streq(utf8(addr), "abc")`.
+- `strieq(str1, str2)`: Compare two strings (case insensitive).
+- `strlen(str)`: Calculates the length of a string.
+
+The functions `ansi`/`utf8`/`utf16` can be used as inputs for other functions that take `str` arguments. If the `addr` cannot be read an empty string is returned. If you want to fail you can use the `.strict` variants (for example `utf8.strict(rax)`).
+
+The expression `utf8(rax)` does not return a number, so it cannot be used as a trace condition for example.
+
+## GUI Interaction
+
+* `disasm.sel()`/`dis.sel()`: Get the selected address in the disassembly view.
+* `dump.sel()`: Get the selected address in the dump view.
+* `stack.sel()`: Get the selected address in the stack view.
+
+## Source
+
+* `src.disp(addr)`: Get displacement of `addr` relative to last source line.
+* `src.line(addr)`: Get the source line number of `addr`.
+
+## Modules
+
+* `mod.party(addr)`: Get the party number of the module `addr`. `0` is user module, `1` is system module.
+* `mod.base(addr)`: Get the base address of the module `addr`.
+* `mod.size(addr)`: Get the size of the module `addr`.
+* `mod.hash(addr)`: Get the hash of the module `addr`.
+* `mod.entry(addr)`: Get the entry address of the module `addr`.
+* `mod.system(addr)`: True if the module at `addr` is a system module. False: module is a user module.
+* `mod.user(addr)`: True if the module at `addr` is a user module. False: module is NOT a user module.
+* `mod.main()`: Returns the base of the main module (debuggee). If this is a DLL it will return `0` until loaded.
+* `mod.rva(addr)`: Get the RVA of `addr`. If `addr` is not inside a module it will return `0`.
+* `mod.offset(addr)`: Get the file offset of `addr`. If `addr` is not inside a module it will return `0`.
+* `mod.isexport(addr)`: True if `addr` is an exported function from a module.
+* `mod.fromname(str)`: Gets the module base for `str`. `0` if the module is not found. Example: `mod.fromname("ntdll.dll")`.
+
+## Process Information
+
+* `peb()`: Get PEB address.
+* `teb()`: Get TEB address.
+* `tid()`: Get the current thread ID.
+* `kusd()`,`KUSD()`,`KUSER_SHARED_DATA()`: Get the address of `KUSER_SHARED_DATA` (`0x7FFE0000`).
+
+## General Purpose
+
+* `bswap(value)`: Byte-swap `value`. For example, `bswap(44332211)` = 0x11223344.
+* `ternary(condition, val1, val2)`: If condition is nonzero, return `val1`, otherwise return `val2`.
+* `GetTickCount()`: The Windows API `GetTickCount()`, a timer that increases every 1ms.
+* `rdtsc()`: The result of the `RDTSC` instruction, a CPU timer. Only 32-bit result is returned in 32-bit environment.
+* `isdebuggerfocused()`: Check if x64dbg is focused. Return `1` when x64dbg is focused, otherwise return `0`.
+* `isdebuggeefocused()`: Check if the debugged program is focused. Return `1` when the debugged program is focused, otherwise return `0`.
+
+## Memory
+
+* `mem.valid(addr)`: True if `addr` is a valid memory address.
+* `mem.base(addr)`: Returns the base of the memory page of `addr` (can change depending on your memory map mode).
+* `mem.size(addr)`: Returns the size of the memory page of `addr` (can change depending on your memory map mode).
+* `mem.iscode(addr)`: True if `addr` is a page that is executable.
+* `mem.decodepointer(ptr)`: Equivalent to calling the `DecodePointer` API on `ptr`, only works on Vista+.
+
+## Disassembly
+
+* `dis.len(addr)`: Get the length of the instruction at `addr`.
+* `dis.iscond(addr)`: True if the instruction at `addr` is a conditional branch.
+* `dis.isbranch(addr)`: True if the instruction at `addr` is a branch (jcc/call).
+* `dis.isret(addr)`: True if the instruction at `addr` is a `ret`.
+* `dis.iscall(addr)`: True if the instruction at `addr` is a `call`.
+* `dis.ismem(addr)`: True if the instruction at `addr` has a memory operand.
+* `dis.isnop(addr)`: True if the instruction at `addr` is equivalent to a NOP.
+* `dis.isunusual(addr)`: True if the instruction at `addr` is unusual.
+* `dis.branchdest(addr)`: Branch destination of the instruction at `addr` (what it follows if you press enter on it).
+* `dis.branchexec(addr)`: True if the branch at `addr` is going to execute.
+* `dis.imm(addr)`: Immediate value of the instruction at `addr`.
+* `dis.brtrue(addr)`: Branch destination of the instruction at `addr`.
+* `dis.brfalse(addr)`: Address of the next instruction if the instruction at `addr` is a conditional branch.
+* `dis.next(addr)`: Address of the next instruction from `addr`.
+* `dis.prev(addr)`: Address of the previous instruction from `addr`.
+* `dis.iscallsystem(addr)`: True if the instruction at `addr` goes to a system module.
+* `dis.mnemonic(addr)`: Returns the mnemonic `str` for `addr`. Example: `str.streq(dis.mnemonic(cip), "cpuid")`.
+* `dis.text(addr)`: Returns the instruction text as a string `addr`. Can be used for conditions, for example: `strstr(dis.text(rip), "rbx")`. **Note**: the instruction text might not exactly match the formatting in the GUI.
+* `dis.match(addr, str)`: True if the instruction at `addr` matches the regex in `str`. Example: `dis.match(rip, "test.+, 0x1")`. You can use `dis.text` to see what you can match on.
+
+## Tracing
+
+* `tr.enabled(addr)`: True if the trace coverage is enabled at `addr`.
+* `tr.hitcount(addr)`: Number of hits in the trace coverage at `addr`.
+* `tr.isrecording()`,`tr.runtraceenabled()`: True if trace recording is enabled.
+
+## Byte/Word/Dword/Qword/Ptr
+
+* `ReadByte(addr)`,`Byte(addr)`,`byte(addr)`: Read a byte from `addr` and return the value. Example: `byte(eax)` reads a byte from memory location `[eax]`.
+* `ReadWord(addr)`,`Word(addr)`,`word(addr)`: Read a word (2 bytes) from `addr` and return the value.
+* `ReadDword(addr)`,`Dword(addr)`,`dword(addr)`: Read a dword (4 bytes) from `addr` and return the value.
+* `ReadQword(addr)`,`Qword(addr)`,`qword(addr)`: Read a qword (8 bytes) from `addr` and return the value (only available on x64).
+* `ReadPtr(addr)`,`ReadPointer(addr)`,`ptr(addr)`,`Pointer(addr)`,`pointer(addr)`: Read a pointer (4/8 bytes) from `addr` and return the value.
+
+These expression functions return `0` when `addr` is not valid.
+
+## Functions
+
+* `func.start()`: Return start of the function `addr` is part of, zero otherwise.
+* `func.end()`: Return end of the function `addr` is part of, zero otherwise.
+
+## References
+
+* `ref.count()`: Number of entries in the current reference view.
+* `ref.addr(index)`: Get the address of the reference at `index`. Zero on failure.
+
+## Arguments
+
+This assumes the return address is on the stack (eg you are inside the function).
+
+* `arg(index)`, `arg.get(index)`: Gets the argument at `index` (zero-based).
+* `arg.set(index, value)`: Sets the argument at `index` (zero-based) to `value`.
+
+## Exceptions
+
+This is a set of functions to get information about the last exception. They can be used for exceptions breakpoints to construct more advanced conditions.
+
+* `ex.firstchance()`: Whether the last exception was a first chance exception.
+* `ex.addr()`: Last exception address. For example the address of the instruction that caused the exception.
+* `ex.code()`: Last exception code.
+* `ex.flags()`: Last exception flags.
+* `ex.infocount()`: Last exception information count (number of parameters).
+* `ex.info(index)`: Last exception information, zero if index is out of bounds. For access violations or memory breakpoints `ex.info(1)` contains the address of the accessed memory (see [EXCEPTION_RECORD.ExceptionInformation](https://docs.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-exception_record) for details).
+
+## Syscalls
+
+* `syscall.name(number)`: Returns the name of the syscall of `number` as a string.
+* `syscall.id(name)`: Returns the syscall number of a `name`.
+
+## Plugins
+
+Plugins can register their own expression functions. You can find an example in the [StackContains](https://github.com/mrexodia/StackContains/blob/315c55381676201ace4cf88bfcb684e62489b129/StackContains/plugin.cpp#L5-L39) plugin. Relevant functions:
+
+- [`_plugin_registerexprfunction`](../developers/plugins/API/registerexprfunction.rst)
+- [`_plugin_registerexprfunctionex`](../developers/plugins/API/registerexprfunctionex.rst)
+- [`_plugin_unregisterexprfunction`](../developers/plugins/API/unregisterexprfunction.rst)
+
+# REFERENCE: Formatting
+# String Formatting
+
+This section explains the simple string formatter built into x64dbg.
+
+The basic syntax is `{?:expression}` where `?` is the optional type of the [expression](./Expressions.md). To output `{` or `}` in the result, escape them as `{{` or `}}`.
+
+## Types
+
+- `d` signed **d**ecimal: `-3`
+- `u` **u**nsigned decimal: `57329171`
+- `p` zero prefixed **p**ointer: `0000000410007683`
+- `s` **s**tring pointer: `"this is a string"` (**not recommended**, use `{utf8@address}` instead)
+- `x` he**x**: `3C28A` (default for integer values)
+- `a` **a**ddress info: `00401010 <module.EntryPoint>`
+- `i` **i**nstruction text: `jmp 0x77ac3c87`
+- `f` single precision floating-point pointer or register: If `10001234` is an address of a single precision floating-point number 3.14, `{f:10001234}` will print `3.14`. It can also accept XMM, YMM and ZMM registers: `{f:XMM0}` prints the single precision floating-point number at XMM0 bit 31:0, `{f:YMM7[7]}` prints the single precision floating-point number at YMM7 bit 255:224. x87 registers are currently not supported.
+-   `F` double precision floating-point pointer or register: Similar to `f`, except that the data is interpreted as double precision floating-point number. It can also accept XMM, YMM and ZMM registers: `{F:YMM7[3]}` prints the double precision floating-point number at YMM7 bit 255:192.
+
+**Note**: XMM, YMM and ZMM registers may only be used with the `f`/`F` floating-point type. (Issue 2826 links to details about why)
+
+## Complex Type
+
+- `{mem;size@address}` will print the `size` bytes starting at `address` in hex.
+- `{winerror@code}` will print the name of windows error code(returned with `GetLastError()`) and the description of it(with `FormatMessage`). It is similar to ErrLookup utility.
+- `{winerrorname@code}` will print the name of windows error code(returned with `GetLastError()`) only.
+- `{ntstatus@code}` will print the name of NTSTATUS error code and the description of it(with `FormatMessage`).
+- `{ntstatusname@code}` will print the name of NTSTATUS error code only.
+- `{ascii[;length]@address}` will print the ASCII string at `address` with an optional `length` (in bytes).
+- `{ansi[;length]@address}` will print the ANSI (local codepage) string at `address` with an optional `length` (in bytes).
+- `{utf8[;length]@address}` will print the UTF-8 string at `address` with an optional `length` (in bytes).
+- `{utf16[;length]@address}` will print the UTF-16 string at `address` with an optional `length` (in words).
+- `{disasm@address}` will print the disassembly at `address` (equivalent to `{i:address}`).
+- `{modname@address}` will print the name of the module at `address`.
+- `{bswap[;size]@value}` will byte-swap `value` for a specified `size` (size of pointer per default).
+- `{label@address}` will print the (auto)label at `address`.
+- `{comment@address}` will print the (auto)comment at `address`.
+
+## Examples
+
+- `rax: {rax}` formats to `rax: 4C76`
+- `password: {utf16@4*ecx+0x402000}` formats to `password: s3cret`
+- `function type: {mem;1@[ebp]+0xa}` formats to `function type: 01`
+- `{x:bswap(rax)}` where `rax=0000000078D333E0` formats to `E033D37800000000` because of bswap fun which reverse the hex value
+- `{bswap;4@rax}` where `rax=1122334455667788` formats to `88776655`
+- `mnemonic: {dis.mnemonic(dis.sel())}` formats to `mnemonic: push`
+- `return address: `{a:[rsp]}` formats to `00401010 <module.myfunction+N>`
+
+## Logging
+
+When using the `log` command you should put quotes around the format string (`log "{mem;8@rax}"`) to avoid ambiguity with the `;` (which separates two commands). See [issue #1931](https://github.com/x64dbg/x64dbg/issues/1931) for more details.
+
+## Plugins
+
+Plugins can use [`_plugin_registerformatfunction`](../developers/plugins/API/registerformatfunction.rst) to register custom string formatting functions. The syntax is `{type;arg1;arg2;argN@expression}` where `type` is the name of the registered function, `argN` is any string (these are passed to the formatting function as arguments) and `expression` is any valid expression.
+
+# REFERENCE: Variables
+# Variables
+
+This program supports variables. There are three types of variables:
+
+- USER: Variables created by the user using the `var`/`mov` commands. These variables have no access restrictions. You generally only deal with these.
+- SYSTEM: Variables created by x64dbg, that can be read and written, but cannot be deleted.
+- READONLY: Variables created by x64dbg, that can be read, but not written or deleted.
+
+## Setting variables
+
+You can set variables in the following ways:
+
+```
+mov myvar, 1234
+mov $myvar, 1234
+myvar = 1234
+$myvar = 1234
+```
+
+All of the above set a USER variable `myvar` to the [value](./Values.md) `0x1234`. You can also use the C-style assignment operators (see the [expression](./Expressions.md) documentation for a full list of supported operators):
+
+```
+myvar += 0x10
+myvar |= 0x10
+myvar++
+myvar--
+```
+
+## Reserved Variables
+
+There are a few reserved variables:
+
+- `$res`/`$result`: General result variable.
+- `$resN`/`$resultN`: Optional other result variables (N= 1-4).
+- `$pid`: Process ID of the debugged executable.
+- `$hp`/`$hProcess`: Debugged executable handle.
+- `$lastalloc`: Last result of the `alloc` command.
+- `$breakpointcondition` : Controls the pause behaviour in the conditional breakpoint command.
+- `$breakpointcounter` : The hit counter of the breakpoint, set before the condition of the conditional breakpoint is evaluated.
+- `$breakpointlogcondition` : The log condition of the conditional breakpoint. It cannot be used to control the logging behavoiur.
+
+# analadv
+
+Do function analysis, embedded data analysis and xref analysis.
+
+## arguments
+
+This command has no arguments.
+
+## results
+
+This command does not set any result variables.
+
+# analrecur/analr
+
+Do single function analysis.
+
+## arguments
+
+`arg1` The base address of the function to analyze.
+
+## results
+
+This command does not set any result variables.
+
+# analxrefs/analx
+
+Do xrefs analysis in the module selected in the disassembly view.
+
+## arguments
+
+This command has no arguments.
+
+## results
+
+This command does not set any result variables.
+
+# analyse/analyze/anal
+
+Do function analysis.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# analyse_nukem/analyze_nukem/anal_nukem
+
+Do function analysis using nukem's algorithm.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# cfanalyze/cfanalyse/cfanal
+
+Do control flow analysis in the module selected in the disassembly view.
+
+## arguments
+
+This command has no arguments.
+
+## results
+
+This command does not set any result variables.
+
+# exanalyse/exanalyze/exanal
+
+Do exception directory analysis. This kind of analysis doesn't work on 32-bit executables.
+
+## arguments
+
+This command has no arguments.
+
+## results
+
+This command does not set any result variables.
+
+exhandlers
+==========
+Print all exception handlers, including SEH(StructuredExceptionHandler), VEH(VectoredExceptionHandler),
+VCH(VectoredContinueHandler) and UnhandledExceptionFilter, into the log.
+
+arguments
+---------
+This command has no arguments
+
+results
+-------
+This command does not set any result variables.
+
+# exinfo
+
+Print the `EXCEPTION_DEBUG_INFO` structure from the last exception.
+
+Sample output:
+
+```
+EXCEPTION_DEBUG_INFO:
+           dwFirstChance: 1
+           ExceptionCode: 80000001 (EXCEPTION_GUARD_PAGE)
+          ExceptionFlags: 00000000
+        ExceptionAddress: 00007FFE16FB1B91 ntdll.00007FFE16FB1B91
+        NumberParameters: 2
+ExceptionInformation[00]: 0000000000000008
+ExceptionInformation[01]: 00007FFE16FB1B91 ntdll.00007FFE16FB1B91
+```
+
+arguments
+---------
+This command has no arguments
+
+results
+-------
+This command does not set any result variables.
+
+# GetRelocSize/grs
+
+Get the correct size of a relocation table. This is useful while unpacking and restoring the original relocation table.
+
+## arguments
+
+`arg1` The address of the relocation table to analyze.
+
+## results
+
+The found size of the relocation table is stored in `$result`.
+
+# imageinfo
+
+Output the image information for a module. The information describes the Characteristics and DLL Characteristics fields in the PE header structure.
+
+## arguments
+
+`[arg1]` The base of the module. If not specified the module at CIP will be used.
+
+## results
+
+This command does not set any result variables.
+
+# symdownload/downloadsym
+
+Attempt to download a symbol from a Symbol Store.
+
+## arguments
+
+`[arg1]` Module name (with or without extension) to attempt to download symbols for. When not specified, an attempt will be done to download symbols for all loaded modules.
+
+`[arg2]` Symbol Store URL. When not specified, the default store will be used.
+
+## result
+
+This command does not set any result variables.
+
+# symload/loadsym
+
+Attempt to load a symbol from disk.
+
+## arguments
+
+`arg1` Module name (with or without extension) to attempt to load symbols for.
+
+`arg2` Path to the symbol file.
+
+`[arg3]` Force load. Set to `1` to skip symbol validation.
+
+## result
+
+This command does not set any result variables.
+
+# symunload/unloadsym
+
+Unload a symbol.
+
+## arguments
+
+`arg1` Module name (with or without extension) to unload symbols from.
+
+## result
+
+This command does not set any result variables.
+
+# traceexecute
+
+Tell the debugger that an address has been traced.
+
+## arguments
+
+`arg1` The address.
+
+## result
+
+This command does not set any result variables.
+
+# virtualmod
+
+Tell the debugger to treat a memory range as a virtual module.
+
+## arguments
+
+`arg1` the user-supplied module name.
+
+`arg2` the base of the memory range.
+
+`[arg3]` the size of the memory range.
+
+## result
+
+This command does not set any result variables.
+
+# bpgoto
+
+Configure the breakpoint so that when the program reaches it, the program will be directed to a new location. It is equivallent to the following commands:
+
+```
+SetBreakpointCondition arg1, 0
+SetBreakpointCommand arg1, "CIP=arg2"
+SetBreakpointCommandCondition arg1, 1
+SetBreakpointFastResume arg1, 0
+```
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`arg2` The new address to execute if the breakpoint is reached.
+
+## results
+
+This command does not set any result variables.
+
+# bplist
+
+Get a list of breakpoints. This list includes their state (enabled/disabled), their type, their address and (optionally) their names.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables. A list entry has the following format:
+
+STATE:TYPE:ADDRESS\[:NAME\]
+
+STATEcan be 0 or 1. 0 means disabled, 1 means enabled. Only singleshoot and 'normal' breakpoints can be disabled.
+
+TYPEcan be one of the following values: BP, SS, HW and GP. BP stands for a normal breakpoint (set using the SetBPX command), SS stands for SINGLESHOT, HW stands for HARDWARE and GP stand for Guard Page, the way of setting memory breakpoints.
+
+ADDRESSis the breakpoint address, given in 32 and 64 bits for the x32 and x64 debugger respectively.
+
+NAMEis the name assigned to the breakpoint.
+
+# DeleteBPX/bpc/bc
+
+Delete a breakpoint set using the SetBPX command.
+
+## arguments
+
+`[arg1]` Name or address of the breakpoint to delete. If this argument is not specified, all breakpoints will be deleted.
+
+## result
+
+This command does not set any result variables.
+
+﻿# DeleteExceptionBPX
+
+Delete an exception breakpoint set using the SetExceptionBPX command.
+
+## arguments
+
+`[arg1]` Name, exception name or code of the exception breakpoint to delete. If this argument is not specified, all exception breakpoints will be deleted.
+
+## result
+
+This command does not set any result variables.
+
+# DeleteHardwareBreakpoint/bphc/bphwc
+
+Delete a hardware breakpoint set using the SetHardwareBreakpoint command.
+
+## arguments
+
+`[arg1]` Name or address of the hardware breakpoint to delete. If this argument is not specified, all hardware breakpoints will be deleted.
+
+## result
+
+This command does not set any result variables.
+
+# DeleteMemoryBPX/membpc/bpmc
+
+Delete a memory breakpoint set using the SetMemoryBPX command.
+
+## arguments
+
+`[arg1]` Name or (base) address of the memory breakpoint to delete. If this argument is not specified, all memory breakpoints will be deleted.
+
+## result
+
+This command does not set any result variables.
+
+# DisableBPX/bpd/bd
+
+Disable a breakpoint set using the SetBPX command.
+
+## arguments
+
+`[arg1]` Name or address of the breakpoint to disable. If this argument is not specified, all breakpoints will be disabled.
+
+## result
+
+This command does not set any result variables.
+
+﻿# DisableExceptionBPX
+
+Disable an exception breakpoint set using the SetExceptionBPX command.
+
+## arguments
+
+`[arg1]` Name, exception name or code of the exception breakpoint to enable. If this argument is not specified, all exception breakpoints will be disabled.
+
+## result
+
+This command does not set any result variables.
+
+# DisableHardwareBreakpoint/bphd/bphwd
+
+Disable a hardware breakpoint.
+
+## arguments
+
+`[arg1]` Address of the hardware breakpoint to disable. If this argument is not specified, all hardware breakpoints will be disabled.
+
+## result
+
+This command does not set any result variables.
+
+# DisableMemoryBreakpoint/membpd/bpmd
+
+Disable a memory breakpoint.
+
+## arguments
+
+`[arg1]` Address of the memory breakpoint to disable. If this argument is not specified, all memory breakpoints will be disabled.
+
+## result
+
+This command does not set any result variables.
+
+# EnableBPX/bpe/be
+
+Enable a breakpoint set using the SetBPX command.
+
+## arguments
+
+`[arg1]` Name or address of the breakpoint to enable. If this argument is not specified, all breakpoints will be enabled.
+
+## result
+
+This command does not set any result variables.
+
+# EnableExceptionBPX
+
+Enable an exception breakpoint set using the SetExceptionBPX command.
+
+## arguments
+
+`[arg1]` Name, exception name or code of the exception breakpoint to enable. If this argument is not specified, all exception breakpoints will be enabled.
+
+## result
+
+This command does not set any result variables.
+
+# EnableHardwareBreakpoint/bphe/bphwe
+
+Enable a previously disabled hardware breakpoint.
+
+## arguments
+
+`[arg1]` Address of the hardware breakpoint to enable. If this argument is not specified, as many as possible hardware breakpoints will be enabled.
+
+## result
+
+This command does not set any result variables.
+
+# EnableMemoryBreakpoint/membpe/bpme
+
+Enable a previously disabled memory breakpoint.
+
+## arguments
+
+`[arg1]` Address of the memory breakpoint to enable. If this argument is not specified, all memory breakpoints will be enabled.
+
+## result
+
+This command does not set any result variables.
+
+﻿# LibrarianDisableBreakpoint/bpddll
+
+Enable a DLL breakpoint set using the LibrarianSetBreakpoint command.
+
+## arguments
+
+`[arg1]` DLL Name of the DLL breakpoint to disable. If this argument is not specified, all DLL breakpoints will be disabled.
+
+## result
+
+This command does not set any result variables.
+
+# LibrarianEnableBreakpoint/bpedll
+
+Enable a DLL breakpoint set using the LibrarianSetBreakpoint command.
+
+## arguments
+
+`[arg1]` DLL Name of the DLL breakpoint to enable. If this argument is not specified, all DLL breakpoints will be enabled.
+
+## result
+
+This command does not set any result variables.
+
+# LibrarianRemoveBreakpoint/bcdll
+
+Remove a DLL breakpoint.
+
+## arguments
+
+`arg1` DLL Name to remove the breakpoint from.
+
+## result
+
+This command does not set any result variables.
+
+# LibrarianSetBreakpoint/bpdll
+
+Set a singleshoot breakpoint on DLL load/unload.
+
+## arguments
+
+`arg1` DLL Name to break on.
+
+`[arg2]` `a` means on load and unload, `l` means on load, `u` means on unload. When not specified, x64dbg will break on both load and unload.
+
+`[arg3]` When specified, the breakpoint will be singleshoot. When not specified the breakpoint will not be removed after it has been hit.
+
+## result
+
+This command does not set any result variables.
+
+﻿# SetBPX/bp/bpx
+
+Set an INT3 (SHORT/LONG) or UD2 breakpoint and optionally assign a name to it.
+
+## arguments
+
+`arg1` Address to put a breakpoint on. This can be an API name.
+
+`[arg2]` Name of the breakpoint, use quotation marks to include spaces. This name can be used by the EnableBPX, DisableBPX and DeleteBPX functions as alias, but is mainly intended to provide a single line of information about the currently-hit breakpoint. When arg2 equals to a valid type (arg3) the type is used and arg2 is ignored.
+
+`[arg3]` Breakpoint type. Can be one of the following options in random order: "ss" (single shot breakpoint), "long" (CD03), "ud2" (0F0B) and "short" (CC). You can combine the "ss" option with one of the type options in one string. Example: "SetBPX 00401000,"entrypoint",ssud2" will set a single shot UD2 breakpoint at 00401000 with the name "entrypoint". When specifying no type or just the type "ss" the default type will be used. Per default this equals to the "short" type. You can change the default type using the "SetBPXOptions" command.
+
+## result
+
+This command does not any result variables.
+
+# SetBPXOptions/bptype
+
+Set the default type for the "SetBPX" command.
+
+## arguments
+
+`arg1` Default type. This can be "short" (CC), "long" (CD03) or "ud2" (0F0B). Type default type affects both NORMAL and SINGLESHOT breakpoints.
+
+## result
+
+This command does not set any result variables.
+
+﻿# SetExceptionBPX
+
+Set an exception breakpoint. If an exception breakpoint is active, all the exceptions with the same chance and code will be captured as a breakpoint event and will not be handled by the default exception handling policy.
+
+## arguments
+
+`arg1` Exception name or code of the new exception breakpoint
+
+`[arg2]` Chance. Set to `first`/`1` to capture first-chance exceptions, `second`/`2` to capture second-chance exceptions, `all`/`3` to capture all exceptions. Default value is `first`.
+
+## result
+
+This command does not any result variables.
+
+# SetHardwareBreakpoint/bph/bphws
+
+Set a hardware breakpoint (using debug registers).
+
+## arguments
+
+`arg1` Address of the hardware breakpoint.
+
+`[arg2]` Hardware breakpoint type. Can be either 'r' (readwrite), 'w' (write) or 'x' (execute). When not specified, 'x' is assumed.
+
+`[arg3]` Hardware breakpoint size. Can be either '1', '2', '4' or '8' (x64 only). Per default, '1' is assumed. The address you're putting the hardware breakpoint on must be aligned to the specified size.
+
+## result
+
+This command does not set any result variables.
+
+# SetMemoryBPX/membp/bpm
+
+Set a memory breakpoint (GUARD_PAGE) on the whole memory region the provided address is in.
+
+## arguments
+
+`arg1` Address of or inside a memory region that will be watched.
+
+`[arg2]` 1/0 restore the memory breakpoint once it's hit? When this value is not equal to '1' or '0', it's assumed to be arg3. This means "bpm eax,r" would be the same command as: "bpm eax,0,r".
+
+`[arg3]` Breakpoint type, it can be 'a' (read+write+execute) 'r' (read), 'w' (write) or 'x' (execute). Per default, it's 'a' (read+write+execute)
+
+## result
+
+This command does not set any result variables.
+
+# SetMemoryRangeBPX/memrangebp/bpmrange
+
+Set a memory breakpoint (GUARD_PAGE) on a specific memory range.
+
+## arguments
+
+`start` Start of the memory range.
+
+`size` Size of the memory range.
+
+`[type]` Breakpoint type, it can be 'a' (read+write+execute) 'r' (read), 'w' (write) or 'x' (execute). Per default, it's 'a' (read+write+execute). Append `ss` for a singleshot breakpoint (you can also use [`SetMemoryBreakpointSingleshoot`](../conditional-breakpoint-control/SetMemoryBreakpointSingleshoot.md) to do this).
+
+## result
+
+This command does not set any result variables.
+
+# GetBreakpointHitCount
+
+Gets the hit counter of a software breakpoint.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+## result
+
+`$result` will be set to the current value of the hit counter.
+
+# GetExceptionBreakpointHitCount
+
+Gets the hit counter of an exception breakpoint.
+
+## arguments
+
+`arg1` The name, exception name or code of the exception breakpoint.
+
+## result
+
+`$result` will be set to the current value of the hit counter.
+
+# GetHardwareBreakpointHitCount
+
+Gets the hit counter of a hardware breakpoint.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+## result
+
+`$result` will be set to the current value of the hit counter.
+
+# GetLibrarianBreakpointHitCount
+
+Gets the hit counter of a librarian breakpoint.
+
+## arguments
+
+`arg1` The DLL name.
+
+## result
+
+`$result` will be set to the current value of the hit counter.
+
+# GetMemoryBreakpointHitCount
+
+Gets the hit counter of a memory breakpoint.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+## result
+
+`$result` will be set to the current value of the hit counter.
+
+# ResetBreakpointHitCount
+
+Resets the hit counter of a software breakpoint.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The new hit count (zero when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# ResetExceptionBreakpointHitCount
+
+Resets the hit counter of an exception breakpoint.
+
+## arguments
+
+`arg1` The name, exception code or name of the exception breakpoint.
+
+`[arg2]` The new hit count (zero when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# ResetHardwareBreakpointHitCount
+
+Resets the hit counter of a hardware breakpoint.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The new hit count (zero when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# ResetLibrarianBreakpointHitCount
+
+Resets the hit counter of a librarian breakpoint.
+
+## arguments
+
+`arg1` The DLL name.
+
+`[arg2]` The new hit count (zero when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# ResetMemoryBreakpointHitCount
+
+Resets the hit counter of a memory breakpoint.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The new hit count (zero when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetBreakpointCommand
+
+Sets the command to execute when a software breakpoint is hit. If the command condition is not specified, it will be executed when the debugger breaks, otherwise it will be executed when the condition is satisfied.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The command (empty when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetBreakpointCommandCondition
+
+Sets the command condition of a software breakpoint. When command condition is not specified, the command will be executed when the debugger would break, otherwise it will be executed when the condition is satisfied.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The command condition (default condition when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetBreakpointCondition/bpcond/bpcnd
+
+Sets the software breakpoint condition. When this condition is set, it is evaluated every time the breakpoint hits and the debugger would stop only if condition is not 0.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The condition expression.
+
+## result
+
+This command does not set any result variables.
+
+# SetBreakpointFastResume
+
+Sets the fast resume flag of a software breakpoint. If this flag is set and the break condition doesn't evaluate to break, no GUI, plugin, logging or any other action will be performed, except for incrementing the hit counter.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The fast resume flag. If it is 0 (default), fast resume is disabled, otherwise it is enabled
+
+## result
+
+This command does not set any result variables.
+
+# SetBreakpointLog/bplog/bpl
+
+Sets log text when a software breakpoint is hit. When log condition is not specified, it will always be logged regardless of the break condition, otherwise it will be logged when the logging condition is satisfied.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The log format string (see introduction/formatting).
+
+## result
+
+This command does not set any result variables.
+
+# SetBreakpointLogCondition/bplogcondition
+
+Sets the logging condition of a software breakpoint. When log condition is not specified, log text always be logged regardless of the break condition, otherwise it will be logged when the logging condition is satisfied.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The logging condition (default condition when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetBreakpointName/bpname
+
+Sets the name of a software breakpoint. It will be displayed in the breakpoints view and in the log when the breakpoint is hit.
+
+## arguments
+
+`arg1` The address of an existing software breakpoint.
+
+`[arg2]` The name of the breakpoint (empty when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetBreakpointSilent
+
+Sets the silent flag of a software breakpoint. If this flag is set, the default log message will not appear. User-defined log is not affected.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The silent flag. If it is 0 (default), silent is disabled, otherwise it is enabled
+
+## result
+
+This command does not set any result variables.
+
+# SetBreakpointSingleshoot
+
+Sets the singleshoot flag of a software breakpoint. If this flag is set the breakpoint will be removed on the first hit.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The singleshoot flag. If it is 0 (default), singleshoot is disabled, otherwise it is enabled
+
+## result
+
+This command does not set any result variables.
+
+# SetExceptionBreakpointCommand
+
+Sets the command to execute when an exception breakpoint is hit. If the command condition is not specified, it will be executed when the debugger breaks, otherwise it will be executed when the condition is satisfied.
+
+## arguments
+
+`arg1` The name, exception name or code of the exception breakpoint.
+
+`[arg2]` The command (empty when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetExceptionBreakpointCommandCondition
+
+Sets the command condition of an exception breakpoint. When command condition is not specified, the command will be executed when the debugger would break, otherwise it will be executed when the condition is satisfied.
+
+## arguments
+
+`arg1` The name, exception name or code of the exception breakpoint.
+
+`[arg2]` The command condition (default condition when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetExceptionBreakpointCondition
+
+Sets the exception breakpoint condition. When this condition is set, it is evaluated every time the exception occurs (chance must match) and the debugger would stop only if condition is not 0.
+
+## arguments
+
+`arg1` The name, exception name or code of the exception breakpoint.
+
+`[arg2]` The condition expression.
+
+## result
+
+This command does not set any result variables.
+
+# SetExceptionBreakpointFastResume
+
+Sets the fast resume flag of an exception breakpoint. If this flag is set and the break condition doesn't evaluate to break, no GUI, plugin, logging or any other action will be performed, except for incrementing the hit counter.
+
+## arguments
+
+`arg1` The name, exception name or code of the exception breakpoint.
+
+`[arg2]` The fast resume flag. If it is 0 (default), fast resume is disabled, otherwise it is enabled
+
+## result
+
+This command does not set any result variables.
+
+# SetExceptionBreakpointLog
+
+Sets log text when an exception breakpoint is hit. When log condition is not specified, it will always be logged regardless of the break condition, otherwise it will be logged when the logging condition is satisfied.
+
+## arguments
+
+`arg1` The name, exception name or code of the exception breakpoint.
+
+`[arg2]` The log format string (see introduction/formatting).
+
+## result
+
+This command does not set any result variables.
+
+# SetExceptionBreakpointLogCondition
+
+Sets the logging condition of an exception breakpoint. When log condition is not specified, log text always be logged regardless of the break condition, otherwise it will be logged when the logging condition is satisfied.
+
+## arguments
+
+`arg1` The name, exception name or code of the exception breakpoint.
+
+`[arg2]` The logging condition (default condition when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetExceptionBreakpointName
+
+Sets the name of an exception breakpoint. It will be displayed in the breakpoints view and in the log when the breakpoint is hit.
+
+## arguments
+
+`arg1` The name, exception name or code of the exception breakpoint.
+
+`[arg2]` The name of the breakpoint (empty when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetExceptionBreakpointSilent
+
+Sets the silent flag of an exception breakpoint. If this flag is set, the default log message will not appear. User-defined log is not affected.
+
+## arguments
+
+`arg1` The name, exception name or code of the exception breakpoint.
+
+`[arg2]` The silent flag. If it is 0 (default), silent is disabled, otherwise it is enabled
+
+## result
+
+This command does not set any result variables.
+
+# SetExceptionBreakpointSingleshoot
+
+Sets the singleshoot flag of an exception breakpoint. If this flag is set the exception breakpoint will be removed on the first hit.
+
+## arguments
+
+`arg1` The name, exception name or code of the exception breakpoint.
+
+`[arg2]` The singleshoot flag. If it is 0 (default), singleshoot is disabled, otherwise it is enabled
+
+## result
+
+This command does not set any result variables.
+
+# SetHardwareBreakpointCommand
+
+Sets the command to execute when a hardware breakpoint is hit. If the command condition is not specified, it will be executed when the debugger breaks, otherwise it will be executed when the condition is satisfied.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The command (empty when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetHardwareBreakpointCommandCondition
+
+Sets the command condition of a hardware breakpoint. When command condition is not specified, the command will be executed when the debugger would break, otherwise it will be executed when the condition is satisfied.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The command condition (default condition when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetHardwareBreakpointCondition/bphwcond
+
+Sets the hardware breakpoint condition. When this condition is set, it is evaluated every time the breakpoint hits and the debugger would stop only if condition is not 0.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The condition expression.
+
+## result
+
+This command does not set any result variables.
+
+# SetHardwareBreakpointFastResume
+
+Sets the fast resume flag of a hardware breakpoint. If this flag is set and the break condition doesn't evaluate to break, no GUI, plugin, logging or any other action will be performed, except for incrementing the hit counter.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The fast resume flag. If it is 0 (default), fast resume is disabled, otherwise it is enabled
+
+## result
+
+This command does not set any result variables.
+
+# SetHardwareBreakpointLog/bphwlog
+
+Sets log text when a hardware breakpoint is hit. When log condition is not specified, it will always be logged regardless of the break condition, otherwise it will be logged when the logging condition is satisfied.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The log format string (see introduction/formatting).
+
+## result
+
+This command does not set any result variables.
+
+# SetHardwareBreakpointLogCondition/bphwlogcondition
+
+Sets the logging condition of a hardware breakpoint. When log condition is not specified, log text always be logged regardless of the break condition, otherwise it will be logged when the logging condition is satisfied.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The logging condition (default condition when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetHardwareBreakpointName/bphwname
+
+Sets the name of a hardware breakpoint. It will be displayed in the breakpoints view and in the log when the breakpoint is hit.
+
+## arguments
+
+`arg1` The address of an existing hardware breakpoint.
+
+`[arg2]` The name of the breakpoint (empty when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetHardwareBreakpointSilent
+
+Sets the silent flag of a hardware breakpoint. If this flag is set, the default log message will not appear. User-defined log is not affected.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The silent flag. If it is 0 (default), silent is disabled, otherwise it is enabled
+
+## result
+
+This command does not set any result variables.
+
+# SetHardwareBreakpointSingleshoot
+
+Sets the singleshoot flag of a hardware breakpoint. If this flag is set the breakpoint will be removed on the first hit.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The singleshoot flag. If it is 0 (default), singleshoot is disabled, otherwise it is enabled
+
+## result
+
+This command does not set any result variables.
+
+# SetLibrarianBreakpointCommand
+
+Sets the command to execute when a librarian breakpoint is hit. If the command condition is not specified, it will be executed when the debugger breaks, otherwise it will be executed when the condition is satisfied.
+
+## arguments
+
+`arg1` The DLL name.
+
+`[arg2]` The command (empty when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetLibrarianBreakpointCommandCondition
+
+Sets the command condition of a librarian breakpoint. When command condition is not specified, the command will be executed when the debugger would break, otherwise it will be executed when the condition is satisfied.
+
+## arguments
+
+`arg1` The DLL name.
+
+`[arg2]` The command condition (default condition when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetLibrarianBreakpointCondition
+
+Sets the librarian breakpoint condition. When this condition is set, it is evaluated every time the breakpoint occurs and the debugger would stop only if condition is not 0.
+
+## arguments
+
+`arg1` The DLL name.
+
+`[arg2]` The condition expression.
+
+## result
+
+This command does not set any result variables.
+
+# SetLibrarianBreakpointFastResume
+
+Sets the fast resume flag of a librarian breakpoint. If this flag is set and the break condition doesn't evaluate to break, no GUI, plugin, logging or any other action will be performed, except for incrementing the hit counter.
+
+## arguments
+
+`arg1` The DLL name.
+
+`[arg2]` The fast resume flag. If it is 0 (default), fast resume is disabled, otherwise it is enabled
+
+## result
+
+This command does not set any result variables.
+
+# SetLibrarianBreakpointLog
+
+Sets log text when a librarian breakpoint is hit. When log condition is not specified, it will always be logged regardless of the break condition, otherwise it will be logged when the logging condition is satisfied.
+
+## arguments
+
+`arg1` The DLL name.
+
+`[arg2]` The log format string (see introduction/formatting).
+
+## result
+
+This command does not set any result variables.
+
+# SetLibrarianBreakpointLogCondition
+
+Sets the logging condition of a librarian breakpoint. When log condition is not specified, log text always be logged regardless of the break condition, otherwise it will be logged when the logging condition is satisfied.
+
+## arguments
+
+`arg1` The DLL name.
+
+`[arg2]` The logging condition (default condition when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetLibrarianBreakpointName
+
+Sets the name of a librarian breakpoint. It will be displayed in the breakpoints view and in the log when the breakpoint is hit.
+
+## arguments
+
+`arg1` The DLL name.
+
+`[arg2]` The name of the breakpoint (empty when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetLibrarianBreakpointSilent
+
+Sets the silent flag of a librarian breakpoint. If this flag is set, the default log message will not appear. User-defined log is not affected.
+
+## arguments
+
+`arg1` The DLL name.
+
+`[arg2]` The silent flag. If it is 0 (default), silent is disabled, otherwise it is enabled
+
+## result
+
+This command does not set any result variables.
+
+# SetLibrarianBreakpointSingleshoot
+
+Sets the singleshoot flag of a librarian breakpoint. If this flag is set the librarian breakpoint will be removed on the first hit.
+
+## arguments
+
+`arg1` The DLL name.
+
+`[arg2]` The singleshoot flag. If it is 0 (default), singleshoot is disabled, otherwise it is enabled
+
+## result
+
+This command does not set any result variables.
+
+# SetMemoryBreakpointCommand
+
+Sets the command to execute when a memory breakpoint is hit. If the command condition is not specified, it will be executed when the debugger breaks, otherwise it will be executed when the condition is satisfied.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The command (empty when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetMemoryBreakpointCommandCondition
+
+Sets the command condition of a memory breakpoint. When command condition is not specified, the command will be executed when the debugger would break, otherwise it will be executed when the condition is satisfied.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The command condition (default condition when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetMemoryBreakpointCondition/bpmcond
+
+Sets the memory breakpoint condition. When this condition is set, it is evaluated every time the breakpoint hits and the debugger would stop only if condition is not 0.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The condition expression.
+
+## result
+
+This command does not set any result variables.
+
+# SetMemoryBreakpointFastResume
+
+Sets the fast resume flag of a memory breakpoint. If this flag is set and the break condition doesn't evaluate to break, no GUI, plugin, logging or any other action will be performed, except for incrementing the hit counter.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The fast resume flag. If it is 0 (default), fast resume is disabled, otherwise it is enabled
+
+## result
+
+This command does not set any result variables.
+
+# SetMemoryBreakpointLog/bpmlog
+
+Sets log text when a memory breakpoint is hit. When log condition is not specified, it will always be logged regardless of the break condition, otherwise it will be logged when the logging condition is satisfied.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The log format string (see introduction/formatting).
+
+## result
+
+This command does not set any result variables.
+
+# SetMemoryBreakpointLogCondition/bpmlogcondition
+
+Sets the logging condition of a memory breakpoint. When log condition is not specified, log text always be logged regardless of the break condition, otherwise it will be logged when the logging condition is satisfied.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The logging condition (default condition when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetMemoryBreakpointName/bpmname
+
+Sets the name of a memory breakpoint. It will be displayed in the breakpoints view and in the log when the breakpoint is hit.
+
+## arguments
+
+`arg1` The address of an existing memory breakpoint.
+
+`[arg2]` The name of the breakpoint (empty when not specified).
+
+## result
+
+This command does not set any result variables.
+
+# SetMemoryBreakpointSilent
+
+Sets the silent flag of a memory breakpoint. If this flag is set, the default log message will not appear. User-defined log is not affected.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The silent flag. If it is 0 (default), silent is disabled, otherwise it is enabled
+
+## result
+
+This command does not set any result variables.
+
+# SetMemoryBreakpointSingleshoot
+
+Sets the singleshoot flag of a memory breakpoint. If this flag is set the breakpoint will be removed on the first hit.
+
+## arguments
+
+`arg1` The address of the breakpoint.
+
+`[arg2]` The singleshoot flag. If it is 0 (default), singleshoot is disabled, otherwise it is enabled
+
+## result
+
+This command does not set any result variables.
+
+# AttachDebugger/attach
+
+Attach the debugger to a running process.
+
+## arguments
+
+`arg1` Process Identifier (PID) of the running process.
+
+`[arg2]` Handle to an Event Object to signal (this is for internal use only).
+
+`[arg3]` Thread Identifier (TID) of the thread to resume after attaching (this is for internal use only).
+
+## result
+
+This command will give control back to the user after the system breakpoint is reached. It will set `$pid` and `$hp`/`$hProcess` variables.
+
+# DebugContinue/con
+
+Set debugger continue status.
+
+## arguments
+
+`[arg1]` When set (to anything), the exception will be handled by the program. Otherwise the exception will be swallowed.
+
+## result
+
+This command does not set any result variables.
+
+# DetachDebugger/detach
+
+Detach the debugger from the currently-debugged process.
+
+## arguments
+
+This command has no arguments.
+
+## results
+
+This command does not set any result variables.
+
+# erun/ego/er/eg
+
+Free the lock and allow the program to run, **passing all first-chance exceptions to the debuggee**.
+
+## arguments
+
+`[arg1]` When specified, place a single-shot breakpoint at this location before running.
+
+## results
+
+This command does not set any result variables.
+
+# eStepInto/esti
+
+Single Step (using Trap-Flag), **passing all first-chance exceptions to the debuggee**.
+
+## arguments
+
+`[arg1]` The number of steps to take. If not specified `1` is used.
+
+## result
+
+This command does not set any result variables.
+
+# eStepOut/ertr
+
+Return from function by calling eStepOver until the current instruction is a RET. This command **passes all first-chance exceptions to the debuggee**.
+
+## arguments
+
+`[arg1]` The number of times to step out. If not specified `1` is used.
+
+## result
+
+This command does not set any result variables.
+
+# eStepOver/estep/esto/est
+
+Step over calls, **passing all first-chance exceptions to the debuggee**. When the instruction at EIP/RIP isn't a call, a `eStepInto` is performed.
+
+## arguments
+
+`[arg1]` The number of steps to take. If not specified `1` is used.
+
+## result
+
+This command does not set any result variables.
+
+# InitDebug/initdbg/init
+
+Initializes the debugger. This command will load the executable (do some basic checks), set breakpoints on TLS callbacks (if present), set a breakpoint at the process entry point and break at the system breakpoint before giving back control to the user.
+
+## arguments
+
+`arg1` Path to the executable file to debug. If no full path is given, the `GetCurrentDirectory` API will be called to retrieve a full path. Use quotation marks to include spaces in your path.
+
+`[arg2]` Commandline to create the process with.
+
+`[arg3]` Current folder (passed to the `CreateProcess` API) (this is also sometimes called 'working directory' or 'current directory')
+
+## result
+
+This command will give control back to the user after the system breakpoint is reached. It will set `$pid` and `$hp`/`$hProcess` variables.
+
+# InstrUndo
+
+Undo last instruction stepped. This command is only valid if some instructions are stepped in. Stepping over, running or tracing will clear the history context.
+
+## arguments
+
+This command has no arguments.
+
+## results
+
+This command does not set any result variables.
+
+# pause
+
+Pause the debuggee or stop animation if animation is in progress.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# run/go/r/g
+
+Free the lock and allow the program to run.
+
+## arguments
+
+`[arg1]` When specified, place a single-shot breakpoint at this location before running.
+
+## results
+
+This command does not set any result variables.
+
+# serun/sego
+
+Free the lock and allow the program to run, **swallowing the current exception, skipping exception dispatching in the debuggee**.
+
+## arguments
+
+`[arg1]` When specified, place a single-shot breakpoint at this location before running.
+
+## results
+
+This command does not set any result variables.
+
+# seStepInto/sesti
+
+Single Step (using Trap-Flag), **swallowing the current exception, skipping exception dispatching in the debuggee**.
+
+## arguments
+
+`[arg1]` The number of steps to take. If not specified `1` is used.
+
+## result
+
+This command does not set any result variables.
+
+# seStepOver/sestep/sesto/sest
+
+Step over calls, **swallowing the current exception, skipping exception dispatching in the debuggee**. When the instruction at EIP/RIP isn't a call, a `eStepInto` is performed.
+
+## arguments
+
+`[arg1]` The number of steps to take. If not specified `1` is used.
+
+## result
+
+This command does not set any result variables.
+
+# skip
+
+Skip the next instruction. This command swallows the current exception (if present). Useful if you want to continue after an INT3 command.
+
+## arguments
+
+`[arg1]` The number of instructions to skip. If not specified `1` is used.
+
+## result
+
+This command does not set any result variables.
+
+# StepInto/sti
+
+Single Step (using Trap-Flag).
+
+## arguments
+
+`[arg1]` The number of steps to take. If not specified `1` is used.
+
+## result
+
+This command does not set any result variables.
+
+# StepOut/rtr
+
+Return from function by calling StepOver until the current instruction is a RET.
+
+## arguments
+
+`[arg1]` The number of times to step out. If not specified `1` is used.
+
+## result
+
+This command does not set any result variables.
+
+# StepOver/step/sto/st
+
+Step over calls. When the instruction at EIP/RIP isn't a call, a StepInto is performed.
+
+## arguments
+
+This command has no arguments.
+
+## results
+
+This command does not set any result variables.
+
+# StepSystem/StepSystemInto
+
+Step into until reaching a system module.
+
+## arguments
+
+This command has no arguments.
+
+## results
+
+This command does not set any result variables.
+
+# StepUser/StepUserInto
+
+Step into until reaching a user module.
+
+## arguments
+
+This command has no arguments.
+
+## results
+
+This command does not set any result variables.
+
+# StopDebug/stop/dbgstop
+
+Terminate the current debuggee and stop debugging it.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# add
+
+Add two values.
+
+## arguments
+
+`arg1` Destination.
+
+`arg2` Source.
+
+## result
+
+This command does not set any result variables.
+
+# and
+
+Binary AND two values.
+
+## arguments
+
+`arg1` Destination.
+
+`arg2` Source.
+
+## result
+
+This command does not set any result variables.
+
+# bswap
+
+Perform a `bswap` operation: The byte order of the destination is inverted, so the last byte becomes the first.
+
+## arguments
+
+`arg1` Destination.
+
+## result
+
+This command does not set any result variables.
+
+# cmp
+
+This command compares two expressions. Notice that when you want to check for values being bigger or smaller, the comparison arg1>arg2 is made. If this evaluates to true, the $_BS_FLAG is set to 1, meaning the value is bigger. So you test if arg1 is bigger/smaller than arg2.
+
+## arguments
+
+`arg1` First expression to compare.
+
+`arg2` Second expression to compare.
+
+## result
+
+This command sets the internal variables $_EZ_FLAG and $_BS_FLAG. They are checked when a branch is performed.
+
+﻿# dec
+
+Decrease a value.
+
+## arguments
+
+`arg1` Destination.
+
+## result
+
+This command does not set any result variables.
+
+# div
+
+Devide two values.
+
+## arguments
+
+`arg1` Destination.
+
+`arg2` Source.
+
+## result
+
+This command does not set any result variables.
+
+# inc
+
+Increase a value.
+
+## arguments
+
+`arg1` Destination.
+
+## result
+
+This command does not set any result variables.
+
+# kmovd/kmovq
+
+The `kmovd`/`kmovq` commands are used to access AVX-512 opmask registers `K0`-`K7`. These commands are only available when the computer and x64dbg version supports AVX-512.
+
+The `kmovd` command copies a 32-bit value from an expression to an AVX-512 opmask register, or from an AVX-512 opmask register to a memory location, a general purpose register, or an opmask register.
+If the destination is a 64-bit register, for example, an opmask register, then the 32-bit value is zero-extended to 64 bits.
+
+The `kmovq` command copies a 64-bit value from an expression to an AVX-512 opmask register, or from an AVX-512 opmask register to a memory location, a general purpose register, or an opmask register.
+If executed in 32-bit environment, then only memory locations in the form of `[address]` or opmask registers are supported as operands.
+In 64-bit environment, all valid expressions can be used to calculate the value to be copied into the destination opmask register.
+
+## arguments
+
+`arg1` The destination operand.
+
+`arg2` The source operand.
+
+## result
+
+This command does not set any result variables.
+
+# lzcnt
+
+Count the number of leading zeros of a value. If the value is 0, then the result is 64 on 64-bit platform and 32 on 32-bit platform.
+
+## arguments
+
+`arg1` Value.
+
+## result
+
+`arg1` is set to the number of leading zeros. Additionaly, the internal variable `$_EZ_FLAG` is set to 1 if `arg1` is 0, and set to 0 otherwise. The internal variable `$_BS_FLAG` is set to 0.
+
+# mov/set
+
+Set a variable.
+
+## arguments
+
+`arg1` Variable name (optionally prefixed with a $) to set. When the variable does not exist, it will be created. Note that SSE registers are not supported (Instead use [movdqu](movdqu.md) for SSE registers).
+
+`arg2` Value to store in the variable. If you use `#11 22 33#` it will write the bytes `11 22 33` in the process memory at `arg1`.
+
+## result
+
+This command does not set any result variables.
+
+# movdqu/movups/movupd
+
+Read/write an XMM register. The source and destination operands can be either an XMM register, or a memory location. The value of destination operand will be set to source operand. When using a memory location, only the syntax `[addr]` is supported, where `addr` is an expression of the memory address. Unlike other commands, the size of operands are 16 bytes. MM/YMM/ZMM registers are not supported by this command, to access YMM/ZMM registers, use [`vmovdqu`](vmovdqu.md) command.
+
+## arguments
+
+`arg1` The destination operand.
+
+`arg2` The source operand.
+
+## result
+
+This command does not set any result variables.
+
+# mul
+
+Multiply two values and store the lower part of result into `arg1`.
+
+## arguments
+
+`arg1` Destination.
+
+`arg2` Source.
+
+## result
+
+This command does not set any result variables.
+
+# mulhi
+
+Multiply two unsigned values and store the upper part of result into `arg1`.
+
+## arguments
+
+`arg1` Destination.
+
+`arg2` Source.
+
+## result
+
+This command does not set any result variables.
+
+# neg
+
+Negate a value.
+
+## arguments
+
+`arg1` Destination.
+
+## result
+
+This command does not set any result variables.
+
+# not
+
+Binary NOT a value.
+
+## arguments
+
+`arg1` Destination.
+
+## result
+
+This command does not set any result variables.
+
+# or
+
+Binary OR two values.
+
+## arguments
+
+`arg1` Destination.
+
+`arg2` Source.
+
+## result
+
+This command does not set any result variables.
+
+# pop
+
+Pop a value from the stack.
+
+## arguments
+
+`[arg1]` The destination. When not specified it will just increase CSP.
+
+## result
+
+This command does not set any result variables.
+
+# popcnt
+
+Evaluate the population count of a value, that is, number of bits set to 1.
+
+## arguments
+
+`arg1` Value.
+
+## result
+
+`arg1` is set to the population count. Additionaly, the internal variable `$_EZ_FLAG` is set to 1 if `arg1` is 0, and set to 0 otherwise. The internal variable `$_BS_FLAG` is set to 0.
+
+# push
+
+Push a value on the stack.
+
+## arguments
+
+`arg1` The value to push on the stack.
+
+## result
+
+This command does not set any result variables.
+
+# rol
+
+Binary ROL (rotate left) a value.
+
+## arguments
+
+`arg1` Destination.
+
+`arg2` Source.
+
+## result
+
+This command does not set any result variables.
+
+# ror
+
+Binary ROR (rotate right) a value.
+
+## arguments
+
+`arg1` Destination.
+
+`arg2` Source.
+
+## result
+
+This command does not set any result variables.
+
+# sar
+
+Binary SAR (signed shift right) a value.
+
+## arguments
+
+`arg1` Destination.
+
+`arg2` Source.
+
+## result
+
+This command does not set any result variables.
+
+# shl/sal
+
+Binary SHL/SAL (signed/unsigned shift left) a value.
+
+## arguments
+
+`arg1` Destination.
+
+`arg2` Source.
+
+## result
+
+This command does not set any result variables.
+
+# shr
+
+Binary SHR (unsigned shift right) a value.
+
+## arguments
+
+`arg1` Destination.
+
+`arg2` Source.
+
+## result
+
+This command does not set any result variables.
+
+# sub
+
+Subtract two values.
+
+## arguments
+
+`arg1` Destination.
+
+`arg2` Source.
+
+## result
+
+This command does not set any result variables.
+
+# test
+
+Binary TEST a value.
+
+## arguments
+
+`arg1` Value to test.
+
+`arg2` Tester.
+
+## result
+
+This command sets the internal variables $_EZ_FLAG and $_BS_FLAG. $_EZ_FLAG is set to 1 when arg1 & arg2 == 0. $_BS_FLAG is always set to 0.
+
+# vmovdqu/vmovups/vmovupd
+
+Read/write a YMM/ZMM register. The source and destination operands can be either an YMM/ZMM register, or a memory location. The value of destination operand will be set to source operand. When using a memory location, only the syntax `[addr]` is supported, where `addr` is an expression of the memory address. Unlike other commands, the size of operands are 32 bytes for YMM registers and 64 bytes for ZMM registers. To access ZMM registers, the computer and x64dbg version must support AVX-512. To access XMM registers, use [`movdqu`](movdqu.md) command.
+
+## arguments
+
+`arg1` The destination operand.
+
+`arg2` The source operand.
+
+## result
+
+This command does not set any result variables.
+
+# xor
+
+Binary XOR two values.
+
+## arguments
+
+`arg1` Destination.
+
+`arg2` Source.
+
+## result
+
+This command does not set any result variables.
+
+# AddFavouriteCommand
+
+Add a command in the favourites menu.
+
+## arguments
+
+`arg1` The command to add.
+
+`[arg2]` The optional shortcut key for the command.
+
+## results
+
+This command does not set any result variables.
+
+# AddFavouriteTool
+
+Add a tool in the favourites menu.
+
+Note: You can use `%PID%` in the path. This special placeholder will be replaced by the PID of the debuggee before the tool is launched.
+
+## arguments
+
+`arg1` The path of the tool.
+
+`[arg2]` The optional description of the tool. When this is set, it is displayed in the menu instead of the full path.
+
+## results
+
+This command does not set any result variables.
+
+# AddFavouriteToolShortcut/SetFavouriteToolShortcut
+
+Set the shortcut key for an existing favourite tool.
+
+## arguments
+
+`arg1` The full path of an existing favourite tool.
+
+`arg2` The shortcut key for it.
+
+## results
+
+This command does not set any result variables.
+
+# ClearLog/cls/lc/lclr
+
+Clear the log window.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# DisableLog/LogDisable
+
+Disable the log output. New log messages will not be appended to the log view, but they will still be saved in the log file if log redirection is enabled in the log view.
+
+## arguments
+
+This command has no arguments.
+
+## results
+
+This command does not set any result variables.
+
+# disasm/dis/d
+
+Disassemble at a certain position.
+
+## arguments
+
+`[arg1]` The address to disassemble at. When not specified, there will be disassembled at CIP.
+
+## result
+
+This command does not set any result variables.
+
+# dump
+
+Dump at a certain position.
+
+## arguments
+
+`arg1` The address to dump at.
+
+## result
+
+This command does not set any result variables.
+
+# EnableLog/LogEnable
+
+Enable the log output.
+
+## arguments
+
+This command has no arguments.
+
+## results
+
+This command does not set any result variables.
+
+# FoldDisassembly
+
+Fold the disassembly within the specified range.
+
+## arguments
+
+`arg1` The start address of the range.
+
+`arg2` The length of the range.
+
+## results
+
+This command does not set any result variables.
+
+# graph
+
+Graph the control flow of function in the graph view.
+
+## arguments
+
+`[arg1]` The address of the function. The default value is EIP or RIP.
+`[arg2]` Options. If it contains "force" the graph will be reanalyzed, if it contains "silent" no messages will be printed on the console.
+
+## results
+
+This command does not set any result variables.
+
+# guiupdatedisable
+
+Disable GUI update. This can speed up script execution.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# guiupdateenable
+
+Enables GUI update after `guiupdatedisable` is executed.
+
+## arguments
+
+`[arg0]` If not 0, tells the debugger to update its GUI immediately.
+
+## result
+
+This command does not set any result variables.
+
+# memmapdump
+
+Follow an address in the memory map.
+
+## arguments
+
+`arg1` The address to follow.
+
+## result
+
+This command does not set any result variables.
+
+# refadd
+
+Add an entry to the reference view. You need to call 'refinit' before using refadd.
+
+## arguments
+
+`arg1` Address to put in the reference view.
+
+`arg2` Text to put after the address. You can use [String Formatting](../../introduction/Formatting.md) here.
+
+## result
+
+This command does not set any result variables.
+
+# refget
+
+Retrieve the address of a reference.
+
+## arguments
+
+`arg1` Zero-based index of the reference address to retrieve.
+
+## result
+
+The `$result` variable will be set to the address of the requested reference (zero on failure).
+
+# refinit
+
+Initialize reference view for command usage.
+
+## arguments
+
+`[arg1]` The title of the new reference view. You can use [String Formatting](../../introduction/Formatting.md) here.
+
+## result
+
+This command does not set any result variables.
+
+# sdump
+
+Dump the stack at a certain position.
+
+## arguments
+
+`[arg1]` The address to dump at (must be inside the thread stack range). If not specified, `csp` will be used.
+
+## result
+
+This command does not set any result variables.
+
+# setfreezestack
+
+Set if the stack should be frozen.
+
+## arguments
+
+`arg1` '0' for unfrozen, '1' for frozen.
+
+## result
+
+This command does not set any result variables.
+
+# alloc
+
+Allocate memory in the debuggee (using VirtualAllocEx). The memory is allocated with PAGE_EXECUTE_READWRITE protection.
+
+## arguments
+
+`[arg1]` Size of the memory to allocate. When not specified, a default size of 0x1000 is used.
+
+`[arg2]` Address to allocate the memory at. Unspecified or zero means a random address.
+
+## result
+
+This command sets $result to the allocated memory address. It also sets the $lastalloc variable to the allocated memory address when VirtualAllocEx succeeded.
+
+# Fill/memset
+
+Set memory of the debuggee to a specified byte.
+
+## arguments
+
+`arg1` Memory address to start setting bytes.
+
+`arg2` Value (byte) to set memory with.
+
+`[arg3]` Size to set. When not specified the rest of the page is used.
+
+## result
+
+This command does not set any result variables.
+
+# free
+
+Free memory in the debuggee (using VirtualFreeEx).
+
+## arguments
+
+`[arg1]` Address of the memory to free. When not specified, the value at $lastalloc is used.
+
+## result
+
+This command sets $result to 1 if VirtualFreeEx succeeded, otherwise it's set to 0. $lastalloc is set to zero when the address specified is equal to $lastalloc.
+
+# getpagerights/getpagerights/getrightspage
+
+Get the rights of a memory page.
+
+## arguments
+
+`arg1` Memory Address of page (it fix the address if this arg is not the top address of a page).
+
+## result
+
+This command does not set any result variables.
+
+# memcpy
+
+Copy memory in the context of the debuggee, without applying patches.
+
+## arguments
+
+`arg1` Destination address.
+
+`arg2` Source address.
+
+`arg3` Size to copy.
+
+## result
+
+This command sets `$result` to the total amount of bytes written at the destination. The condition `$result == arg3` is true if all memory was copied.
+
+# minidump
+
+Create a [minidump](https://learn.microsoft.com/en-us/windows/win32/debug/minidump-files) with full memory and handle information from the debuggee.
+
+## arguments
+
+`arg1` The filename of the `.dmp`.
+
+## results
+
+This command does not set any result variables.
+
+# savedata
+
+Save a memory region to disk.
+
+## arguments
+
+`arg1` The filename. If you use `:memdump:` as name it will save a file as `memdump_pid_addr_size.bin` in the x64dbg directory. You can use [String Formatting](../../introduction/Formatting.md) here.
+
+`arg2` The address of the memory region.
+
+`arg3` The size of the memory region.
+
+## results
+
+This command does not set any result variables.
+
+# setpagerights/setpagerights/setrightspage
+
+Change the rights of a memory page.
+
+## arguments
+
+`arg1` Memory Address of page (it fix the address if this arg is not the top address of a page).
+
+`arg2` New Rights, this can be one of the following values: "Execute", "ExecuteRead", "ExecuteReadWrite", "ExecuteWriteCopy", "NoAccess", "ReadOnly", "ReadWrite", "WriteCopy". You can add a G at first for add PAGE GUARD. example: "GReadOnly". Read the MSDN for more info.
+
+## result
+
+This command does not set any result variables.
+
+# asm
+
+Assemble an instruction.
+
+## arguments
+
+`arg1` Address to place the assembled instruction at.
+
+`arg2` Instruction text. You can use [String Formatting](../../introduction/Formatting.md) here.
+
+`[arg3]` When specified the remainder of the previous instruction will be filled with NOPs.
+
+## result
+
+$result will be set to the assembled instruction size. 0 on failure.
+
+# chd
+
+Change current directory (SetCurrentDirectory).
+
+## arguments
+
+`arg1` Path of a directory to change to.
+
+## result
+
+This command does not set any result variables.
+
+# config
+
+Get or set the configuration of x64dbg. It can also be used to load and store configuration specific to the script in the configuration file of x64dbg.
+
+## arguments
+
+`arg1` Section name of the INI file.
+
+`arg2` Key name of the INI file.
+
+`[arg3]` Optional new value of the configuration. If this argument is set to a number, it will be stored in the configuration file and ``$result`` is not updated. If this argument is not set, the current configuration will be read into ``$result``.
+
+## results
+
+This command sets `$result` to the current configuration number if `arg3` is not set.
+
+# getcommandline/getcmdline
+
+It gets the actual command line.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# getjit/jitget
+
+Get the Just-In-Time Debugger in Windows. In WIN64 systems there are two JIT entries: one for a x32 debugger and other for a x64 debugger. In a WIN64 system when a x32 process crash: Windows attach the x32 debugger stored in the x32-JIT entry.
+
+Important notes:
+
+- Its possible get the x32-JIT entry from the x64 debugger (using the x32 arg).
+
+- Its possible get the x64-JIT entry from the x32 debugger ONLY if the x32 debugger its running in a WIN64 System (using the x64 arg).
+
+## arguments
+
+Without arguments: Get the current JIT debugger.
+
+`arg2`
+
+1. *old*: Get the old JIT entry stored.
+
+2. *x32*: Get the x32-JIT entry.x64: Get the x64-JIT entry.
+
+## result
+
+This command does not set any result variables.
+
+# getjitauto/jitgetauto
+
+Get the Auto Just-In-Time Debugger FLAG in Windows. if this flag value its TRUE Windows runs the debugger without user confirmation when a process crash. In WIN64 systems there are two JIT AUTO FLAG entries: one for a x32 debugger and other for a x64 debugger. In a WIN64 system when a x32 process crash with AUTO FLAG = FALSE: Windows confirm before attach the x32 debugger stored in the x32-JIT entry.
+
+Important notes:
+
+- Its possible get the x32-JIT AUTO FLAG entry from the x64 debugger (using the x32 arg).
+
+- Its possible get the x64-JIT AUTO FLAG entry from the x32 debugger ONLY if the x32 debugger its running in a WIN64 System (using the x64 arg).
+
+## arguments
+
+without args: Get current JIT entry FLAG.
+
+`arg1`
+
+1. x32: Get the x32-JIT AUTO FLAG.
+
+2. x64: Get the x64-JIT AUTO FLAG.
+
+## result
+
+This command does not set any result variables.
+
+# gpa
+
+Get the address of an export inside a DLL.
+
+## arguments
+
+`arg1` Export name.
+
+`[arg2]` DLL name.
+
+## result
+
+The $result variable is set to the export address. When the export is not found, $result will be set to 0.
+
+# HideDebugger/dbh/hide
+
+Hide the debugger from (very) simple detection methods. The PEB will be modified so that `IsDebuggerPresent()` will return false.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# loadlib
+
+Load a DLL into debugged program memory.
+
+## arguments
+
+`arg1` The name/path of the module to load.
+
+## result
+
+The `$result` variable will be set to the address of the loaded library.
+
+# mnemonicbrief
+
+Output the brief help information about an assembly mnemonic to the log.
+
+## arguments
+
+`arg1` the mnemonic name
+
+## result
+
+This command does not set any result variables.
+
+# mnemonichelp
+
+Output the detailed help information about an assembly mnemonic to the log.
+
+## arguments
+
+`arg1` the mnemonic name
+
+## result
+
+This command does not set any result variables.
+
+# setcommandline/setcmdline
+
+It changes the command line data.
+
+## arguments
+
+`arg1` New command line.
+
+## result
+
+This command does not set any result variables.
+
+# setjit/jitset
+
+Set the Just-In-Time Debugger in Windows. In WIN64 systems there are two JIT entries: one for a x32 debugger and other for a x64 debugger. In a WIN64 system when a x32 process crash: Windows attach the x32 debugger stored in the x32-JIT entry.
+
+Important notes:
+
+- Its possible change the x32-JIT entry from the x64 debugger (using the x32 arg).
+
+- Its possible change the x64-JIT entry from the x32 debugger ONLY if the x32 debugger its running in a WIN64 System (using the x64 arg).
+
+## arguments
+
+Without arguments: Set the current debugger as JIT.
+
+`arg1`
+
+1. *oldsave*: Set the current debugger as JIT and save the last JIT entry.
+
+2. *restore*: Set the old JIT entry stored as JIT and remove it from debugger db.
+
+3. *old* (without arg2): Set the old JIT entry stored as new JIT.
+
+4. *old* (with arg2): Set the arg2 as old JIT entry stored.
+
+5. *x32*: Set the arg2 as new x32-JIT entry.
+
+6. *x64*: Set the arg2 as new x64-JIT entry.
+
+## result
+
+This command does not set any result variables.
+
+# setjitauto/jitsetauto
+
+Set the Auto Just-In-Time Debugger FLAG in Windows. if this flag value its TRUE Windows runs the debugger without user confirmation when a process crash. In WIN64 systems there are two JIT AUTO FLAG entries: one for a x32 debugger and other for a x64 debugger. In a WIN64 system when a x32 process crash with AUTO FLAG = FALSE: Windows confirm before attach the x32 debugger stored in the x32-JIT entry.
+
+Important notes:
+
+- Its possible set the x32-JIT AUTO FLAG entry from the x64 debugger (using the x32 arg).
+
+- Its possible set the x64-JIT AUTO FLAG entry from the x32 debugger ONLY if the x32 debugger its running in a WIN64 System (using the x64 arg).
+
+## arguments
+
+`arg1`
+1. 1/ON: Set current JIT entry FLAG as TRUE.
+
+2. 0/FALSE: Set current JIT entry FLAG as FALSE.
+
+3. x32: Set the x32-JIT AUTO FLAG TRUE or FALSE. It needs an arg2: can be ON/1 or OFF/0.
+
+4. x64: Set the x64-JIT AUTO FLAG TRUE or FALSE. It needs an arg2: can be ON/1 or OFF/0.
+
+## result
+
+This command does not set any result variables.
+
+# zzz/doSleep
+
+Halt execution for some time (equivalent of calling kernel32.Sleep).
+
+## arguments
+
+`[arg1]` Time (in milliseconds) to sleep. If not specified this is set to 100ms (0.1 second). Keep in mind that input is in hex per default so `Sleep 100` will actually sleep 256 milliseconds (use `Sleep .100` instead).
+
+## result
+
+This command does not set any result variables.
+
+# DisablePrivilege
+
+Revoke the privilege.
+
+## arguments
+
+`arg1` The name of the privilege. Example: `SeDebugPrivilege`
+
+## results
+
+This command does not set any result variables.
+
+# EnablePrivilege
+
+Permit the privilege.
+
+## arguments
+
+`arg1` The name of the privilege. Example: `SeDebugPrivilege`
+
+## results
+
+This command does not set any result variables.
+
+# GetPrivilegeState
+
+Query whether the privilege is enabled on the debuggee.
+
+## arguments
+
+`arg1` The name of the privilege. Example: `SeDebugPrivilege`.
+
+## results
+
+This command sets `$result` to `1` if the privilege is disabled on the debuggee, `2` or `3` if the privilege is enabled on the debuggee, `0` if the privilege is not found in the privilege collection of the token of the debuggee or something is wrong with the API.
+
+# handleclose/closehandle
+
+Close a remote handle so that its system resources can be released.
+
+## arguments
+
+`arg1` The handle value of the handle, in the context of the debuggee.
+
+## results
+
+This command does not set any result variables.
+
+# plugload/pluginload/loadplugin
+
+Load a plugin.
+
+## arguments
+
+`arg1` Name of the plugin.
+
+## result
+
+This command does not set any result variables.
+
+# plugunload/pluginunload/unloadplugin
+
+Unload a plugin.
+
+## arguments
+
+`arg1` Name of the plugin.
+
+## result
+
+This command does not set any result variables.
+
+# StartScylla/scylla/imprec
+
+Start the Scylla plugin auto-selecting the currently debugged DLL/EXE and EIP/RIP as entry point.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# call
+
+A call works exactly the same as an uncondentional branch, but it places it's address on the script stack.
+
+## arguments
+
+`arg1` The label to jump to.
+
+## result
+
+This command does not set any result variables.
+
+# error
+
+Show an error message and terminate the script.
+
+## arguments
+
+`arg1` The error message to show.
+
+## result
+
+This command does not set any result variables.
+
+# invalid
+
+Invalid command to throw an error message. This command will halt the script execution.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+Jxx/IFxx
+========
+
+There are various branches that can react on the flags set by the `cmp` (and maybe other) command(s):
+
+* unconditional branch - `jmp`/`goto`
+* branch if not equal - `jne`/`ifne(q)`/`jnz`/`ifnz`
+* branch if equal - `je`/`ife(q)`/`jz`/`ifz`
+* branch if smaller - `jb`/`ifb`/`jl`/`ifl`
+* branch if bigger - `ja`/`ifa`/`jg`/`ifg`
+* branch if smaller/equal - `jbe`/`ifbe(q)`/`jle`/`ifle(q)`
+* branch if bigger/equal - `jae`/`ifae(q)`/`jge`/`ifge(q)`
+
+arguments
+---------
+`arg1` The label to jump to.
+
+result
+------
+This command does not set any result variables.
+
+# msg
+
+Display a message box.
+
+## arguments
+
+`arg1` Message box text. You can use [String Formatting](../../introduction/Formatting.md) here.
+
+## result
+
+This command does not set any result variables.
+
+# msgyn
+
+Display a message box, asking the user to answer yes or no.
+
+## arguments
+
+`arg1` Message box text. You can use [String Formatting](../../introduction/Formatting.md) here.
+
+## result
+
+The `$result` variable will be set to 1 when the user answered yes. Otherwise it's set to 0.
+
+# pause
+
+Halt the script execution. The user can resume the script after this command.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# printstack[,logstack]
+
+Print the stack trace in the log.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# ret
+
+When called without an entry on the stack, this command will end the script and set the script IP to the first line. When 'call' was executed before, ret will return from that call.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# scriptcmd
+
+Execute a command in the context of a running script.
+
+## arguments
+
+Unlike other commands this command forwards everything after `scriptcmd ` directly to the command processor.
+
+For example `scriptcmd add rax, 0x1245` will execute the command `add rax, 0x1234`.
+
+## result
+
+This command does not set any result variables.
+
+## execution behavior
+
+This command blocks until the specified command completes execution. Script execution is handled by a single dedicated thread, ensuring commands execute in the order they are submitted without interference from other operations.
+
+## example
+
+This command can be used in combination with [SetBreakpointCommand](../conditional-breakpoint-control/SetBreakpointCommand.md) to execute scripts on breakpoint callbacks:
+
+```
+fn_addr = module.dll:$0x1234 // module.dll RVA 0x1234
+bp fn_addr
+SetBreakpointCommand fn_addr, "scriptcmd call mycallback"
+
+// TODO: make sure the script is not unloaded (using run)
+
+mycallback:
+log "fn({arg.get(0)}, {arg.get(1)})"
+ret
+```
+
+# scriptdll/dllscript
+
+Execute a script DLL.
+
+## arguments
+
+`arg1` The filename and path of the script DLL. If a full path is not provided x64dbg will look in the `scripts` directory for the DLL.
+
+## results
+
+This command does not set any result variables. However, the script DLL may set any variable.
+
+## remarks
+
+A script DLL is a DLL that exports either `AsyncStart()` or `Start()` function.
+
+If the DLL exports `AsyncStart()` function, then x64dbg will call this function on a separate thread. If the DLL exports `Start()` function, then x64dbg will call this function on the current thread, blocking any further command execution until the script DLL finishes execution. If both `AsyncStart()` and `Start()` are exported, only `AsyncStart()` will be executed. Any return value of `AsyncStart()` and `Start()` will not be used by x64dbg.
+
+After `AsyncStart()` or `Start()` finishes, the script DLL will be unloaded from the process.
+
+# scriptexec
+
+Load and execute a script file in a single operation.
+
+## arguments
+
+`arg1` Script file path to load and execute.
+
+## result
+
+This command does not set any result variables.
+
+## execution behavior
+
+This command blocks until the script completes execution. It performs the following operations:
+1. Loads the specified script file
+2. Executes the script from the beginning
+3. Automatically unloads the script only if execution completes successfully
+
+Script execution is handled by a single dedicated thread, ensuring that only one script runs at a time.
+
+## notes
+
+- Cannot be used from within a running script
+- If script execution fails or is aborted, the script remains loaded
+- This is the most convenient way to run standalone scripts
+- Execution always starts from the beginning of the script
+- You can use the Script tab context menu to abort a running script if needed
+
+# scriptload
+
+Load a script file.
+
+## arguments
+
+`arg1` Script file to load.
+
+## result
+
+This command does not set any result variables.
+
+# scriptrun
+
+Run the currently loaded script from the current position.
+
+## arguments
+
+`arg1` (optional) Line number to stop execution at. If not provided, the script runs until completion.
+
+## result
+
+This command does not set any result variables.
+
+## execution behavior
+
+This command blocks until the script completes execution, reaches the specified stop line, encounters an error, or is manually aborted. Script execution is handled by a single dedicated thread, ensuring that only one script runs at a time.
+
+## prerequisites
+
+A script must be loaded using [`scriptload`](scriptload.md) before using this command.
+
+## notes
+
+- Only one script can run at a time
+- Execution starts from the current script instruction pointer
+- The script instruction pointer is automatically managed during execution
+- Use [`scriptabort`](scriptabort.md) to stop a running script
+
+# find
+
+Find a pattern in a memory page. If you want to find all occurrences of a pattern in a memory page use [findall](./findall.md).
+
+## arguments
+
+`arg1` The address to start searching from. Notice that the searching will stop when the end of the memory page this address resides in has been reached. This means you cannot search the complete process memory without enumerating the memory pages first. If you want to find all occurrences of a pattern in the entire memory map use [findallmem](./findallmem.md).
+
+`arg2` The byte pattern to search for. This byte pattern can contain wildcards (?) for example: `EB0?90??8D`. You can use [String Formatting](../../introduction/Formatting.md) here.
+
+`[arg3]` The size of the data to search in. Default is the size of the memory region.
+
+## result
+
+The `$result` variable is set to the virtual address of the address that matches the byte pattern. `$result` will be 0 when the pattern could not be matched.
+
+# findall
+
+Find all occurrences of a pattern in a memory page.
+
+## arguments
+
+`arg1` The address to start searching from. Notice that the searching will stop when the end of the memory page this address resides in has been reached. This means you cannot search the complete process memory without enumerating the memory pages first. You can use [findallmem](./findallmem.md) to search for a pattern in the whole memory.
+
+`arg2` The byte pattern to search for. This byte pattern can contain wildcards (?) for example: `EB0?90??8D`. You can use [String Formatting](../../introduction/Formatting.md) here.
+
+`[arg3]` The size of the data to search in. Default is the size of the memory region.
+
+## result
+
+`$result` is set to the number of occurrences.
+
+## examples
+
+Search for all occurrences a pattern in the memory page CIP is residing:
+
+```
+findall mem.base(cip), "0FA2 E8 ???????? C3"
+```
+
+Search for all occurences of the value of cax in the stack memory page:
+
+```
+findall mem.base(csp), "{bswap@cax}"
+```
+
+## remarks
+
+The contents of the reference view can be iterated in a script with the `ref.addr` [expression function](../../introduction/Expression-functions.md):
+
+```
+i = 0
+loop:
+  addr = ref.addr(i)
+  log "reference {d:i} = {p:addr}"
+  i++
+  cmp i, ref.count()
+  jne loop
+```
+
+# findallmem/findmemall
+
+Find all occurrences of a pattern in the entire memory map.
+
+## arguments
+
+`arg1` The address to start searching from.
+
+`arg2` The byte pattern to search for. This byte pattern can contain wildcards (?) for example: `EB0?90??8D`. You can use [String Formatting](../../introduction/Formatting.md) here.
+
+`[arg3]` The size of the data to search in. Default is the entire memory map (`-1`).
+
+`[arg4]` Set to `user`/`system`/`module` to only include (user/system) modules in the search.
+
+## result
+
+`$result` is set to the number of occurrences.
+
+## remarks
+
+The contents of the reference view can be iterated in a script with the `ref.addr` [expression function](../../introduction/Expression-functions.md):
+
+```
+i = 0
+loop:
+  addr = ref.addr(i)
+  log "reference {d:i} = {p:addr}"
+  i++
+  cmp i, ref.count()
+  jne loop
+```
+
+# findasm/asmfind
+
+Find assembled instruction.
+
+## arguments
+
+`arg1` Instruction to look for (make sure to use quoted "mov eax, ebx" to ensure you actually search for that instruction). You can use [String Formatting](../../introduction/Formatting.md) here.
+
+`[arg2]` Address of/inside a memory page to look in. When not specified CIP will be used.
+
+`[arg3]` The size of the data to search in. Default is the size of the memory region.
+
+## result
+
+The `$result` variable is set to the number of references found.
+
+## remarks
+
+The contents of the reference view can be iterated in a script with the `ref.addr` [expression function](../../introduction/Expression-functions.md):
+
+```
+i = 0
+loop:
+  addr = ref.addr(i)
+  log "reference {d:i} = {p:addr}"
+  i++
+  cmp i, ref.count()
+  jne loop
+```
+
+# findguid/guidfind
+
+Find references to GUID. The referenced GUID must be registered in the system, otherwise it will not be found.
+
+## arguments
+
+`[arg1]` The base of the memory range. If not specified, `RIP` or `EIP` will be used.
+
+`[arg2]` The size of the memory range.
+
+`[arg3]` The region to search. `0` is current region (specified with arg1 and arg2). `1` is current module (the module specified with arg1). `2` is all modules.
+
+## results
+
+Set `$result` to `1` if any GUID is found, `0` otherwise.
+
+## remarks
+
+The contents of the reference view can be iterated in a script with the `ref.addr` [expression function](../../introduction/Expression-functions.md):
+
+```
+i = 0
+loop:
+  addr = ref.addr(i)
+  log "reference {d:i} = {p:addr}"
+  i++
+  cmp i, ref.count()
+  jne loop
+```
+
+# modcallfind
+
+Find all inter-modular calls.
+
+## arguments
+
+`[arg1]` Address of/inside a memory page to find inter-modular calls in. When not specified EIP/RIP will be used.
+
+`[arg2]` The size of the data to search in.
+
+## result
+
+The `$result` variable is set to the number of inter-modular calls found.
+
+## remarks
+
+The contents of the reference view can be iterated in a script with the `ref.addr` [expression function](../../introduction/Expression-functions.md):
+
+```
+i = 0
+loop:
+  addr = ref.addr(i)
+  log "reference {d:i} = {p:addr}"
+  i++
+  cmp i, ref.count()
+  jne loop
+```
+
+# reffind/findref/ref
+
+Find references to a certain value.
+
+## arguments
+
+`arg1` The value to look for.
+
+`[arg2]` Address of/inside a memory page to look in. When not specified CIP will be used.
+
+`[arg3]` The size of the data to search in.
+
+## result
+
+The `$result` variable is set to the number of references found.
+
+## remarks
+
+The contents of the reference view can be iterated in a script with the `ref.addr` [expression function](../../introduction/Expression-functions.md):
+
+```
+i = 0
+loop:
+  addr = ref.addr(i)
+  log "reference {d:i} = {p:addr}"
+  i++
+  cmp i, ref.count()
+  jne loop
+```
+
+# reffindrange/findrefrange/refrange
+
+Find references to a certain range of values.
+
+## arguments
+
+`arg1` Start of the range (will be included in the results when found).
+
+`[arg2]` End of range (will be included in the results when found). When not specified the first argument will be used.
+
+`[arg3]` Address of/inside a memory page to look in. When not specified CIP will be used.
+
+`[arg4]` The size of the data to search in.
+
+## result
+
+The `$result` variable is set to the number of references found.
+
+## remarks
+
+The contents of the reference view can be iterated in a script with the `ref.addr` [expression function](../../introduction/Expression-functions.md):
+
+```
+i = 0
+loop:
+  addr = ref.addr(i)
+  log "reference {d:i} = {p:addr}"
+  i++
+  cmp i, ref.count()
+  jne loop
+```
+
+# refstr/strref
+
+Find referenced text strings.
+
+## arguments
+
+`[arg1]` Address of/inside a memory page to find referenced text strings in. When not specified CIP will be used.
+
+`[arg2]` The size of the data to search in.
+
+## result
+
+The `$result` variable is set to the number of string references found.
+
+## remarks
+
+The contents of the reference view can be iterated in a script with the `ref.addr` [expression function](../../introduction/Expression-functions.md):
+
+```
+i = 0
+loop:
+  addr = ref.addr(i)
+  log "reference {d:i} = {p:addr}"
+  i++
+  cmp i, ref.count()
+  jne loop
+```
+
+# setmaxfindresult/findsetmaxresult
+
+Set the maximum number of occurences found.
+
+## arguments
+
+`arg1` The maximum number of occurences. The default value is 5000.
+
+## results
+
+This command does not set any result variables.
+
+# createthread[,threadcreate,newthread,threadnew]
+
+Create a new thread at the specified entry.
+
+## arguments
+
+`arg1`  The entry of the new thread.
+
+`[arg2]`  The argument of the new thread. If the argument is not specified, the default argument is 0.
+
+## results
+
+`$result` will be set to the thread id of the new thread.
+
+# killthread/threadkill
+
+Kill a thread in the debuggee.
+
+## arguments
+
+`[arg1]` ThreadId of the thread to kill (see the Threads tab). When not specified, the main thread is used.
+
+`[arg2]` Thread exit code. When not specified, 0 will be used.
+
+## result
+
+This command does not set any result variables.
+
+# resumeallthreads/threadresumeall
+
+Resume all threads in the debuggee.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# resumethread/threadresume
+
+Resume a thread in the debuggee.
+
+## arguments
+
+`[arg1]` ThreadId of the thread to resume (see the Threads tab). When not specified, the main thread is used.
+
+## result
+
+This command does not set any result variables.
+
+# setthreadname/threadsetname
+
+Set thread name (only for the debugger, nothing changes in the debuggee).
+
+## arguments
+
+`arg1` ThreadId of the thread to change the priority of (see the Threads tab).
+
+`arg2` New thread name. Leave empty to remove the current name.
+
+## result
+
+This command does not set any result variables.
+
+# setthreadpriority/setprioritythread/threadsetpriority
+
+Set thread priority in the debuggee.
+
+## arguments
+
+`arg1` ThreadId of the thread to change the priority of (see the Threads tab).
+
+`arg2` Priority value, this can be the integer of a valid thread priority (see MSDN) or one of the following values: "Normal", "AboveNormal", "TimeCritical", "Idle", "BelowNormal", "Highest", "Lowest".
+
+## result
+
+This command does not set any result variables.
+
+# suspendallthreads/threadsuspendall
+
+Suspend all threads in the debuggee.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# suspendthread/threadsuspend
+
+Suspend a thread in the debuggee.
+
+## arguments
+
+`[arg1]` ThreadId of the thread to suspend (see the Threads tab). When not specified, the main thread is used.
+
+## result
+
+This command does not set any result variables.
+
+# switchthread/threadswitch
+
+Switch the internal current thread to another thread (resulting in different callstack + different registers displayed).
+
+## arguments
+
+`[arg1]` ThreadId of the thread to switch to (see the Threads tab). When not specified, the main thread is used.
+
+## result
+
+This command does not set any result variables.
+
+# RunToParty
+
+Run the program until the program reaches somewhere belonging to the party number. This works by putting temporary memory breakpoints on all memory pages with matching party number.
+
+## arguments
+
+`arg1` The party number. This value cannot be an expression. Note: `0` is user module, `1` is system module.
+
+## results
+
+This command does not set any result variables.
+
+## see also
+
+[RunToUserCode](RunToUserCode.md)
+
+# RunToUserCode/rtu
+
+Run until user code is reached. It is equivallent to `RunToParty 0`.
+
+This command sets temporary memory breakpoints on all user code pages, rather than single stepping. It fails when another RunToUserCode command is already executing, because the temporary memory breakpoints are already set.
+
+## arguments
+
+This command has no arguments.
+
+## results
+
+This command does not set any result variables.
+
+# StartTraceRecording/StartRunTrace/opentrace
+
+Start recording a trace to the specified file. The file will also be opened in the trace view. Note you need to use [TraceIntoConditional](./TraceIntoConditional.md) or other command to actually trace the program and record instructions.
+
+## arguments
+
+`arg1` The file name. Default file extension "trace32" or "trace64" is not added automatically.
+
+## result
+
+This command does not set any result variables.
+
+# StopTraceRecording/StopRunTrace/tc
+
+Stops trace recording and closes the file.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# TraceIntoBeyondTraceCoverage/TraceIntoBeyondTraceRecord/tibt
+
+Perform [StepInto](StepInto.md) until the program reaches somewhere outside the trace coverage. This is similar to `ticnd tr.hitcount(cip)==0&&arg1, arg2` except that it achieves higher performance by avoiding the expression function invocation.
+
+Usage example: If you want to find out the forking point of the program when different inputs are provided, first enable or re-enable trace coverage to clean trace coverage data.
+Then you trace while input A is provided. Finally you provide input B and execute `TraceIntoBeyondTraceRecord` command. The program will be paused where the instruction is never executed before.
+
+## arguments
+
+`[arg1]` The break condition of tracing. When this condition is satisfied, tracing will stop regardless of `EIP`/`RIP` location. If this argument is not specified then tracing will be unconditional.
+
+`[arg2]` The maximun steps before the debugger gives up. If this argument is not specified, the default value will be 50000.
+
+## result
+
+This command does not set any result variables.
+
+# TraceIntoConditional/ticnd
+
+Trace the program by `StepInto`, until the specified condition is satisfied, or maximum number of steps reached.
+
+## arguments
+
+`arg1` The condition used. When this is evaluated to be a value other than 0, tracing will stop.
+
+`[arg2]` The maximum step count to trace before the debugger gives up.
+
+## results
+
+This command does not set any result variables.
+
+# TraceIntoIntoTraceCoverage/TraceIntoIntoTraceRecord/tiit
+
+Perform StepInto until the program reaches somewhere inside the trace coverage.
+
+## arguments
+
+`[arg1]` The break condition of tracing. When this condition is satisfied, tracing will stop regardless of `EIP`/`RIP` location. If this argument is not specified then tracing will be unconditional.
+
+`[arg2]` The maximun steps before the debugger gives up. If this argument is not specified, the default value will be 50000.
+
+## result
+
+This command does not set any result variables.
+
+# TraceOverBeyondTraceCoverage,TraceOverBeyondTraceRecord/tobt
+
+Perform StepOver until the program reaches somewhere outside the trace coverage.
+
+## arguments
+
+`[arg1]` The break condition of tracing. When this condition is satisfied, tracing will stop regardless of `EIP`/`RIP` location. If this argument is not specified then tracing will be unconditional.
+
+`[arg2]` The maximun steps before the debugger gives up. If this argument is not specified, the default value will be 50000.
+
+## result
+
+This command does not set any result variables.
+
+# TraceOverConditional/tocnd
+
+Trace the program by `StepOver`, until the specified condition is satisfied, or maximum number of steps reached.
+
+## arguments
+
+`arg1` The condition used. When this is evaluated to be a value other than 0, tracing will stop.
+
+`[arg2]` The maximum step count to trace before the debugger gives up.
+
+## results
+
+This command does not set any result variables.
+
+# TraceOverIntoTraceCoverage/TraceOverIntoTraceRecord/toit
+
+Perform StepOver until the program reaches somewhere inside the trace coverage.
+
+## arguments
+
+`[arg1]` The break condition of tracing. When this condition is satisfied, tracing will stop regardless of `EIP`/`RIP` location. If this argument is not specified then tracing will be unconditional.
+
+`[arg2]` The maximun steps before the debugger gives up. If this argument is not specified, the default value will be 50000.
+
+## result
+
+This command does not set any result variables.
+
+# TraceSetCommand/SetTraceCommand
+
+Change the trace command text and condition during tracing. See [Conditional Tracing](../../introduction/ConditionalTracing.md) for more information.
+
+## arguments
+
+`[arg1]` Command text. If not specified the current text/condition is cleared.
+
+`[arg2]` Command condition. If not specified the default condition is used.
+
+## results
+
+This command does not set any result variables.
+
+# TraceSetLog/SetTraceLog
+
+Change the trace log text and condition during tracing. See [Conditional Tracing](../../introduction/ConditionalTracing.md) for more information.
+
+## arguments
+
+`[arg1]` Log text. If not specified the current text/condition is cleared.
+
+`[arg2]` Log condition. If not specified the default condition is used.
+
+## results
+
+This command does not set any result variables.
+
+# TraceSetLogFile/SetTraceLogFile
+
+Redirect the trace log to a file.
+
+## arguments
+
+`arg1` File name to redirect the trace log to. This file will be cleared and overwritten when the trace starts. **This does nothing if you don't set the log text!**
+
+## results
+
+This command does not set any result variables.
+
+# AddArg
+
+Add a new argument to the end of a function.
+
+## arguments
+
+`arg1` The type name of the function (parent).
+
+`arg2` The type of the new argument.
+
+`arg3` The name of the new argument.
+
+## result
+
+This command does not set any result variables.
+
+# AddFunction
+
+Add a new function.
+
+## arguments
+
+`arg1` The type name of the function.
+
+`arg2` The return type.
+
+`[arg3]` Calling convention, choose between `cdecl`, `stdcall`, `thiscall` and `delphi`.
+
+`[arg4]` Set to nonzero to mark this function as `noreturn`.
+
+## result
+
+This command does not set any result variables.
+
+# AddMember
+
+Add a new member to the end of a struct/union.
+
+## arguments
+
+`arg1` The type name of the struct/union (parent).
+
+`arg2` The type of the new member.
+
+`arg3` The name of the new member.
+
+`[arg4]` The array size. A value greater than zero will make this member an array.
+
+`[arg5]` Offset from the start of the structure, only use this for implicitly padded structures. Overlapping with other members is **not** allowed.
+
+## result
+
+This command does not set any result variables.
+
+# AddStruct
+
+Add a new struct.
+
+## arguments
+
+`arg1` The type name of the struct.
+
+## result
+
+This command does not set any result variables.
+
+# AddType
+
+Add a type alias.
+
+## arguments
+
+`arg1` An existing type.
+
+`arg2` The new type alias.
+
+## result
+
+This command does not set any result variables.
+
+# AddUnion
+
+Add a new union.
+
+## arguments
+
+`arg1` The type name of the union.
+
+## result
+
+This command does not set any result variables.
+
+# AppendArg
+
+Add a new argument to the end of the last manipulated function.
+
+## arguments
+
+`arg1` The type of the new argument.
+
+`arg2` The name of the new argument.
+
+## result
+
+This command does not set any result variables.
+
+# AppendMember
+
+Add a new member to the end of the last manipulated struct/union.
+
+## arguments
+
+`arg1` The type of the new member.
+
+`arg2` The name of the new member.
+
+`[arg3]` The array size. A value greater than zero will make this member an array.
+
+`[arg4]` Offset from the start of the structure, only use this for implicitly padded structures. Overlapping with other members is **not** allowed.
+
+## result
+
+This command does not set any result variables.
+
+# ClearTypes
+
+Clear all types.
+
+## arguments
+
+`[arg1]` The owner to clear. Leave this empty unless you know what you're doing.
+
+## result
+
+This command does not set any result variables.
+
+# DataAscii/da
+
+Mark data at address as Ascii.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataByte/db
+
+Mark data at address as Byte.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataCode/dc
+
+Mark data at address as Code.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataDouble/DataReal8
+
+Mark data at address as Double.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataDword/dw
+
+Mark data at address as Dword.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataFloat/DataReal4/df
+
+Mark data at address as Float.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataFword
+
+Mark data at address as Fword.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataJunk
+
+Mark data at address as Junk.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataLongdouble/DataReal10
+
+Mark data at address as Long double.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataMiddle
+
+Mark data at address as Middle.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataMmword
+
+Mark data at address as Mmword.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataOword
+
+Mark data at address as Oword.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataQword/dq
+
+Mark data at address as Qword.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataTbyte
+
+Mark data at address as Tbyte.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataUnicode/du
+
+Mark data at address as Unicode.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataUnknown
+
+Mark data at address as Unknown.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataWord/dw
+
+Mark data at address as Word.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataXmmword
+
+Mark data at address as Xmmword.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# DataYmmword
+
+Mark data at address as Ymmword.
+
+## arguments
+
+`arg1` The address you want to mark.
+
+`[arg2]` Size (in bytes) to mark, when not set this defaults to 1.
+
+## result
+
+This command does not set any result variables.
+
+# EnumTypes
+
+Enumerate all types.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# LoadTypes
+
+Load types from a JSON file.
+
+## arguments
+
+`arg1` The path to the JSON file. The owner of the loaded types will be the filename of the JSON file. Any types previously defined with this owner will be removed.
+
+## result
+
+This command does not set any result variables.
+
+# ParseTypes
+
+Parse and load types from a header file.
+
+## arguments
+
+`arg1` The path to the header file. The owner of the loaded types will be the filename of the header file. Any types previously defined with this owner will be removed.
+
+## result
+
+This command does not set any result variables.
+
+# RemoveType
+
+Remove a type.
+
+## arguments
+
+`arg1` The type to remove.
+
+## result
+
+This command does not set any result variables.
+
+# SizeofType
+
+Get the size of a type.
+
+## arguments
+
+`arg1` Name of the type.
+
+## result
+
+This command will set `$result` to the size of the type.
+
+# VisitType/DisplayType/dt
+
+Display a type and print its members in the struct view.
+
+## arguments
+
+`arg1` The type to display.
+
+`[arg2]` Address to print from. If not specified (or zero) the type will be printed without values.
+
+`[arg3]` Maximum pointer resolution depth. This can be used to also display structures (and values) pointed to by members of the type you are visiting. If not specified or negative, it will default to 2 (configurable with `[Engine].DefaultTypePtrDepth`).
+
+`[arg4]` Name of the variable. If not specified it will default to an empty string.
+
+## result
+
+This command does not set any result variables.
+
+# argumentadd
+
+Add a argument.
+
+## arguments
+
+`arg1` argument range start.
+
+`arg2` argument range end.
+
+## result
+
+This command does not set any result variables.
+
+# argumentclear
+
+Delete all arguments in all modules.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# argumentdel
+
+Delete a argument.
+
+## arguments
+
+`arg1` Address inside the argument range to delete.
+
+## result
+
+This command does not set any result variables.
+
+# argumentlist
+
+List user-defined arguments in reference view.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+`$result` will be set to the number of user-defined arguments.
+
+## remarks
+
+The contents of the reference view can be iterated in a script with the `ref.addr` [expression function](../../introduction/Expression-functions.md):
+
+```
+i = 0
+loop:
+  addr = ref.addr(i)
+  log "reference {d:i} = {p:addr}"
+  i++
+  cmp i, ref.count()
+  jne loop
+```
+
+# bookmarkclear
+
+Delete all bookmarks in all modules.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# bookmarkdel/bookmarkc
+
+Delete a bookmark.
+
+## arguments
+
+`arg1` Address of the bookmark to delete.
+
+## result
+
+This command does not set any result variables.
+
+# bookmarklist
+
+List user-defined bookmarks in reference view.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+`$result` will be set to the number of user-defined bookmarks.
+
+## remarks
+
+The contents of the reference view can be iterated in a script with the `ref.addr` [expression function](../../introduction/Expression-functions.md):
+
+```
+i = 0
+loop:
+  addr = ref.addr(i)
+  log "reference {d:i} = {p:addr}"
+  i++
+  cmp i, ref.count()
+  jne loop
+```
+
+# bookmarkset/bookmark
+
+Set a bookmark.
+
+## arguments
+
+`arg1` Address to set the bookmark at (preferably inside a module).
+
+## result
+
+This command does not set any result variables.
+
+# commentclear
+
+Delete all comments in all modules.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# commentdel/cmtc/cmtdel
+
+Delete a comment.
+
+## arguments
+
+`arg1` Address of the comment to delete.
+
+## result
+
+This command does not set any result variables.
+
+# commentlist
+
+List user-defined comments in reference view.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+`$result` will be set to the number of user-defined comments.
+
+## remarks
+
+The contents of the reference view can be iterated in a script with the `ref.addr` [expression function](../../introduction/Expression-functions.md):
+
+```
+i = 0
+loop:
+  addr = ref.addr(i)
+  log "reference {d:i} = {p:addr}"
+  i++
+  cmp i, ref.count()
+  jne loop
+```
+
+# commentset/cmt/cmtset
+
+Set a comment.
+
+## arguments
+
+`arg1` Address to set the comment at (preferably inside a module).
+
+`arg2` Comment text.
+
+## result
+
+This command does not set any result variables.
+
+# dbclear/cleardb
+
+Clear the program database from memory (not from disk).
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# dbload/loaddb
+
+Load a program database from disk in memory.
+
+## arguments
+
+`[arg1]` Path to load the database from. If specified your current data will not be automatically cleared (import). If not specified all your data will be cleared and the current program database is reloaded from disk.
+
+## result
+
+This command does not set any result variables.
+
+# dbsave/savedb
+
+Save a program database from memory to disk.
+
+## arguments
+
+`[arg1]` Path to save the database to. If not specified your current program database is used.
+
+## result
+
+This command does not set any result variables.
+
+# functionadd/func
+
+Add a function.
+
+## arguments
+
+`arg1` Function range start.
+
+`arg2` Function range end.
+
+## result
+
+This command does not set any result variables.
+
+# functionclear
+
+Delete all functions in all modules.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# functiondel/funcc
+
+Delete a function.
+
+## arguments
+
+`arg1` Address inside the function range to delete.
+
+## result
+
+This command does not set any result variables.
+
+# functionlist
+
+List user-defined functions in reference view.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+`$result` will be set to the number of user-defined functions.
+
+## remarks
+
+The contents of the reference view can be iterated in a script with the `ref.addr` [expression function](../../introduction/Expression-functions.md):
+
+```
+i = 0
+loop:
+  addr = ref.addr(i)
+  log "reference {d:i} = {p:addr}"
+  i++
+  cmp i, ref.count()
+  jne loop
+```
+
+# labelclear
+
+Delete all labels in all modules.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+This command does not set any result variables.
+
+# labeldel/lblc/lbldel
+
+Delete a label.
+
+## arguments
+
+`arg1` Address of the label to delete.
+
+## result
+
+This command does not set any result variables.
+
+# labellist
+
+List user-defined labels in reference view.
+
+## arguments
+
+This command has no arguments.
+
+## result
+
+`$result` will be set to the number of user-defined labels.
+
+## remarks
+
+The contents of the reference view can be iterated in a script with the `ref.addr` [expression function](../../introduction/Expression-functions.md):
+
+```
+i = 0
+loop:
+  addr = ref.addr(i)
+  log "reference {d:i} = {p:addr}"
+  i++
+  cmp i, ref.count()
+  jne loop
+```
+
+# labelset/lbl/lblset
+
+Set a label.
+
+## arguments
+
+`arg1` Address to set the label at (preferably inside a module).
+
+`arg2` Label text. You can use [String Formatting](../../introduction/Formatting.md) here.
+
+## result
+
+This command does not set any result variables.
+
+# var/varnew
+
+Declare a new variable.
+
+**Note**: You should not use this command under normal circumstances. If you want to create a variable you can do so with `myvar = 42`.
+
+## arguments
+
+`arg1` Variable name (will be prefixed with '$' if not done).
+
+`[arg2]` Initial variable value (see console input for details).
+
+## result
+
+This command does not set any result variables.
+
+# vardel
+
+Delete a user-defined variable.
+
+## arguments
+
+`arg1` Name of the variable to delete ($ will be prepended when not present).
+
+## result
+
+This command does not set any result variables.
+
+# varlist
+
+Get a list of all variables and their values.
+
+## arguments
+
+`[arg1]` Filter (USER, SYSTEM, READONLY).
+
+## result
+
+This command does not set any result variables.
+
+# AddWatch
+
+Add a watch item.
+
+## arguments
+
+`arg1` The expression to watch.
+
+`[arg2]` The data type of the watch item. `uint` displays hexadecimal value, `int` displays signed decimal value, `ascii` displays the ASCII string pointed by the value. `unicode` displays the Unicode string pointed by the value. `uint` is the default type.
+
+## results
+
+This command sets `$result` value to the id of the watch item.
+
+# CheckWatchdog
+
+Evaluate all the watch items, trigger or reset watchdog when appropiate.
+
+## arguments
+
+This command has no arguments.
+
+## results
+
+This command set `$result` to 1 if any watchdog is triggered, 0 otherwise.
+
+# DelWatch
+
+Delete a watch item.
+
+## arguments
+
+`arg1` The id of the watch item to delete.
+
+## result
+
+This command does not set any result variables.
+
+# SetWatchdog
+
+Set the watchdog mode of a watch item.
+
+## arguments
+
+`arg1` The id of the watch item.
+
+`[arg2]` The watchdog mode. Possible values:
+
+* disabled : Watchdog is disabled.
+* changed : Watchdog is triggered when the value is changed.
+* unchanged : Watchdog is triggered when the value is not changed.
+* istrue : Watchdog is triggered when the value is not 0.
+* isfalse : Watchdog is triggered when the value is 0.
+
+When this argument is not specified, the mode will be set to "changed" if the current watchdog mode is "disabled", otherwise watchdog will be disabled.
+
+## results
+
+This command does not set any result variables.
+
+# SetWatchExpression
+
+Change the expression of an existing watch item.
+
+## arguments
+
+`arg1` The id of the watch item.
+
+`arg2` The new expression to watch.
+
+`arg3` The new data type of the watch item.
+
+## results
+
+This command does not set any result variables.
+
+# SetWatchName
+
+Rename a watch item.
+
+## arguments
+
+`arg1` The id of the watch item to rename.
+
+`arg2` The new name.
+
+## results
+
+This command does not set any result variables.

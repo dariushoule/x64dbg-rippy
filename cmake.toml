@@ -1,0 +1,51 @@
+[cmake]
+version = "3.15"
+cmkr-include = "cmake/cmkr.cmake"
+
+[project]
+name = "x64dbg-rippy"
+include-before = [
+	"cmake/msvc-static-runtime.cmake",
+	"cmake/msvc-configurations.cmake",
+]
+
+[vcpkg]
+version = "2025.01.13"
+packages = ["qt5-base", "cpp-httplib[openssl]", "nlohmann-json", "webview2"]
+
+[find-package.Qt5Widgets]
+required = true
+
+[find-package.httplib]
+required = true
+
+[find-package.nlohmann_json]
+required = true
+
+[find-package.unofficial-webview2]
+required = true
+
+[fetch-content.x64dbg]
+url = "https://sourceforge.net/projects/x64dbg/files/snapshots/snapshot_2025-08-19_19-40.zip"
+sha1 = "59aceebe442319400e38fa651ceac8df507d9d93"
+include-after = ["cmake/x64dbg.cmake"]
+
+[template.plugin]
+type = "shared"
+add-function = "x64dbg_plugin"
+
+[target.x64dbg-rippy]
+type = "plugin"
+sources = [
+    "src/*.cpp",
+    "src/*.h",
+    "src/plugin.rc",
+]
+link-libraries = [
+    "Qt5::Widgets",
+    "httplib::httplib",
+    "nlohmann_json::nlohmann_json",
+    "unofficial::webview2::webview2",
+    "comctl32",
+]
+compile-features = ["cxx_std_20"]
