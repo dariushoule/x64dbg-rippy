@@ -638,6 +638,17 @@ void ChatPanel::onWebMessage(const std::wstring& jsonMsg)
             m_history.clear();
             m_activeSkill.clear();
         }
+        else if (type == "reload")
+        {
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                m_history.clear();
+                m_activeSkill.clear();
+            }
+            rescanSkills();
+            json msg = {{"type", "info"}, {"message", "reloaded RIPPY.md and skills."}};
+            postToJS(msg.dump());
+        }
         else if (type == "load_skill")
         {
             std::string command = msg.value("command", "");
@@ -685,6 +696,24 @@ void ChatPanel::postToJS(const std::string& jsonStr)
 }
 
 // Build a dynamic system prompt with debugger state context.
+// Load RIPPY.md from the .rippy directory (if it exists).
+static std::string loadRippyMd()
+{
+    std::string path = ChatPanel::getRippyDir() + "\\RIPPY.md";
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return "";
+
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (size <= 0 || size > 256 * 1024) { fclose(f); return ""; }
+
+    std::string content(size, '\0');
+    fread(content.data(), 1, size, f);
+    fclose(f);
+    return content;
+}
+
 static std::string buildSystemPrompt(const std::string& activeSkill = "")
 {
     std::string prompt =
@@ -697,7 +726,17 @@ static std::string buildSystemPrompt(const std::string& activeSkill = "")
         "should be done via execute_command. If you are unsure of exact command syntax, "
         "ALWAYS call get_command_help first to look it up — do not guess. "
         "The dedicated tools (read_memory, disassemble, get_registers, etc.) exist only for "
-        "operations that return structured data the command interface cannot provide.";
+        "operations that return structured data the command interface cannot provide.\n\n"
+        "When using the read_file tool, the user will be asked for permission before the file is read. "
+        "Only request files that are relevant to the current analysis.";
+
+    // Load RIPPY.md user instructions
+    std::string rippyMd = loadRippyMd();
+    if (!rippyMd.empty())
+    {
+        prompt += "\n\n--- USER INSTRUCTIONS (RIPPY.md) ---\n\n";
+        prompt += rippyMd;
+    }
 
     if (DbgIsDebugging())
     {
@@ -769,6 +808,7 @@ struct ToolExecCtx
     std::string name;
     json input;
     json result;
+    bool permitted; // for permission-gated tools
     HANDLE hEvent;
 };
 
@@ -864,12 +904,27 @@ void ChatPanel::sendChatAsync()
                 json toolResults = json::array();
                 for (const auto& tc : calls)
                 {
-                    auto* ctx = new ToolExecCtx{tc.name, tc.input, {}, CreateEvent(nullptr, FALSE, FALSE, nullptr)};
+                    auto* ctx = new ToolExecCtx{tc.name, tc.input, {}, true, CreateEvent(nullptr, FALSE, FALSE, nullptr)};
 
                     GuiExecuteOnGuiThreadEx([](void* ud) {
                         auto* c = static_cast<ToolExecCtx*>(ud);
                         try
                         {
+                            // Permission gate for filesystem tools
+                            if (c->name == "read_file" || c->name == "list_directory")
+                            {
+                                std::string path = c->input.value("path", "");
+                                std::string action = (c->name == "read_file") ? "read file" : "list directory";
+                                std::string msg = "rippy wants to " + action + ":\n\n" + path + "\n\nAllow?";
+                                int ret = MessageBoxA(nullptr, msg.c_str(), "rippy - file access", MB_YESNO | MB_ICONQUESTION | MB_TOPMOST);
+                                if (ret != IDYES)
+                                {
+                                    c->result = {{"error", "user denied file access"}};
+                                    c->permitted = false;
+                                    SetEvent(c->hEvent);
+                                    return;
+                                }
+                            }
                             c->result = executeTool(c->name, c->input);
                         }
                         catch (const std::exception& e)

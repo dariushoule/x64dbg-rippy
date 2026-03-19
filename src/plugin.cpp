@@ -188,6 +188,21 @@ bool pluginInit(PLUG_INITSTRUCT* initStruct)
 {
     dprintf("pluginInit(pluginHandle: %d)\n", pluginHandle);
     _plugin_registercallback(pluginHandle, CB_MENUENTRY, cb_menu_entry);
+
+    // Default the Rippy directory if not configured
+    char rippyDir[MAX_PATH] = {};
+    if (!BridgeSettingGet(CFG_SECTION, CFG_RIPPY_DIR, rippyDir) || strlen(rippyDir) == 0)
+    {
+        char exePath[MAX_PATH] = {};
+        GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+        std::string dir = exePath;
+        auto lastSlash = dir.find_last_of("\\/");
+        if (lastSlash != std::string::npos)
+            dir = dir.substr(0, lastSlash);
+        BridgeSettingSet(CFG_SECTION, CFG_RIPPY_DIR, dir.c_str());
+        dprintf("Defaulted RippyDir to: %s\n", dir.c_str());
+    }
+
     return true;
 }
 

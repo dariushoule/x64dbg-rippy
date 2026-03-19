@@ -369,6 +369,72 @@ static json tool_get_command_help(const json& input)
     return {{"result", result}};
 }
 
+static json tool_read_file(const json& input)
+{
+    std::string path = input.value("path", "");
+    if (path.empty())
+        return {{"error", "path required"}};
+
+    // NOTE: Permission check happens in the tool loop (chat_panel.cpp)
+    // via a frontend confirmation prompt before this function is called.
+
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f)
+        return {{"error", "failed to open: " + path}};
+
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (size < 0 || size > 512 * 1024) // 512KB limit
+    {
+        fclose(f);
+        return {{"error", "file too large (max 512KB)"}};
+    }
+
+    std::string content(size, '\0');
+    fread(content.data(), 1, size, f);
+    fclose(f);
+
+    return {{"content", content}, {"size", size}};
+}
+
+static json tool_list_directory(const json& input)
+{
+    std::string path = input.value("path", "");
+    if (path.empty())
+        return {{"error", "path required"}};
+
+    // NOTE: Permission check happens in the tool loop (chat_panel.cpp)
+
+    std::string pattern = path;
+    if (pattern.back() != '\\' && pattern.back() != '/')
+        pattern += "\\";
+    pattern += "*";
+
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(pattern.c_str(), &fd);
+    if (hFind == INVALID_HANDLE_VALUE)
+        return {{"error", "failed to list: " + path}};
+
+    json entries = json::array();
+    do
+    {
+        if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0)
+            continue;
+        bool isDir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        uint64_t size = ((uint64_t)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+        entries.push_back({
+            {"name", fd.cFileName},
+            {"is_dir", isDir},
+            {"size", isDir ? 0 : size}
+        });
+    } while (FindNextFileA(hFind, &fd));
+
+    FindClose(hFind);
+    return {{"path", path}, {"entries", entries}};
+}
+
 // --- Tool registry ---
 
 static const char* EXECUTE_COMMAND_DESC =
@@ -462,6 +528,24 @@ json getToolDefinitions()
             }}
         },
         {
+            {"name", "read_file"},
+            {"description", "Read the contents of a file from disk. The user will be asked for permission. Use this to examine config files, scripts, or other data relevant to the analysis."},
+            {"input_schema", {
+                {"type", "object"},
+                {"properties", {{"path", {{"type", "string"}, {"description", "Absolute file path to read"}}}}},
+                {"required", json::array({"path"})}
+            }}
+        },
+        {
+            {"name", "list_directory"},
+            {"description", "List files and subdirectories in a directory. The user will be asked for permission. Returns name, type, and size for each entry."},
+            {"input_schema", {
+                {"type", "object"},
+                {"properties", {{"path", {{"type", "string"}, {"description", "Absolute directory path to list"}}}}},
+                {"required", json::array({"path"})}
+            }}
+        },
+        {
             {"name", "get_command_help"},
             {"description",
                 "Search the x64dbg command reference for documentation on a command or topic. "
@@ -506,6 +590,8 @@ json executeTool(const std::string& name, const json& input)
     if (name == "get_memory_map")     return tool_get_memory_map(input);
     if (name == "get_symbol")         return tool_get_symbol(input);
     if (name == "execute_command")    return tool_execute_command(input);
+    if (name == "read_file")          return tool_read_file(input);
+    if (name == "list_directory")     return tool_list_directory(input);
     if (name == "get_command_help")   return tool_get_command_help(input);
 
     return {{"error", "unknown tool: " + name}};

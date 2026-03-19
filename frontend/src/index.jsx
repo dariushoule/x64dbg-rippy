@@ -64,7 +64,9 @@ window.chrome.webview.addEventListener('message', function (event) {
 const BUILTIN_COMMANDS = [
     { name: 'help', description: 'show available commands', builtin: true },
     { name: 'clear', description: 'clear chat and start a new session', builtin: true },
+    { name: 'reload', description: 'reload RIPPY.md, skills, and start fresh', builtin: true },
     { name: 'save', description: 'save conversation as markdown', builtin: true },
+    { name: 'skills', description: 'list available skills', builtin: true },
     { name: 'settings', description: 'open settings dialog', builtin: true },
 ];
 
@@ -468,7 +470,9 @@ function App() {
                 let helpText =
                     '/help — show this message\n' +
                     '/clear — clear chat and start a new session\n' +
+                    '/reload — reload RIPPY.md, skills, and clear chat\n' +
                     '/save — save conversation as markdown\n' +
+                    '/skills — list available skills\n' +
                     '/settings — open settings dialog';
                 if (skills.length > 0) {
                     helpText += '\n\nskills:';
@@ -483,9 +487,25 @@ function App() {
                 window.chrome.webview.postMessage(JSON.stringify({ type: 'clear_history' }));
                 setMessages([]);
                 break;
+            case 'reload':
+                window.chrome.webview.postMessage(JSON.stringify({ type: 'reload' }));
+                setMessages([]);
+                break;
             case 'save':
                 window.chrome.webview.postMessage(JSON.stringify({ type: 'save_conversation' }));
                 break;
+            case 'skills': {
+                if (skills.length === 0) {
+                    setMessages(prev => [...prev, { type: 'info', message: 'no skills found. add .md files to .rippy/skills/' }]);
+                } else {
+                    let text = 'available skills:';
+                    for (const s of skills) {
+                        text += '\n  /' + s.command + ' — ' + s.description;
+                    }
+                    setMessages(prev => [...prev, { type: 'info', message: text }]);
+                }
+                break;
+            }
             case 'settings':
                 window.chrome.webview.postMessage(JSON.stringify({ type: 'open_settings' }));
                 break;
