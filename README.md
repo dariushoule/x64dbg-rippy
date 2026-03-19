@@ -2,7 +2,7 @@
 
 AI reverse engineering assistant for [x64dbg](https://x64dbg.com). Embeds a chat panel directly in the debugger with tool-use capabilities. The AI can read memory, disassemble, set breakpoints, step, and more.
 
-![rippy](rippy.png)
+![rippy](rippy.png?1)
 
 ## Installation
 
