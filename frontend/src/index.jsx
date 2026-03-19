@@ -157,7 +157,43 @@ function ToolCallEntry({ msg }) {
     );
 }
 
-function MessageEntry({ msg }) {
+function PermissionPrompt({ msg, onRespond }) {
+    const [responded, setResponded] = useState(false);
+    const [choice, setChoice] = useState(null);
+
+    const respond = useCallback((allowed) => {
+        if (responded) return;
+        setResponded(true);
+        setChoice(allowed);
+        onRespond(msg.id, allowed);
+    }, [responded, msg.id, onRespond]);
+
+    const label = msg.action === 'read' ? 'read file' : 'list directory';
+
+    if (responded) {
+        return (
+            <div class="entry">
+                <div class={'permission-resolved ' + (choice ? 'allowed' : 'denied')}>
+                    {choice ? 'allowed' : 'denied'}: {label} {msg.path}
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div class="entry">
+            <div class="permission-prompt">
+                <span class="permission-text">rippy wants to {label}: <strong>{msg.path}</strong></span>
+                <span class="permission-buttons">
+                    <a class="permission-allow" onClick={() => respond(true)}>allow</a>
+                    <a class="permission-deny" onClick={() => respond(false)}>deny</a>
+                </span>
+            </div>
+        </div>
+    );
+}
+
+function MessageEntry({ msg, onPermissionRespond }) {
     switch (msg.type) {
         case 'user_message':
             return (
@@ -201,6 +237,9 @@ function MessageEntry({ msg }) {
 
         case 'tool_calls':
             return <ToolCallEntry msg={msg} />;
+
+        case 'permission_request':
+            return <PermissionPrompt msg={msg} onRespond={onPermissionRespond} />;
 
         default:
             return null;
@@ -432,6 +471,9 @@ function App() {
                 case 'skills_list':
                     setSkills(msg.skills || []);
                     break;
+                case 'permission_request':
+                    setMessages(prev => [...prev, msg]);
+                    break;
                 case 'tool_results':
                     setMessages(prev => {
                         const updated = [...prev];
@@ -462,6 +504,14 @@ function App() {
 
     const handleStop = useCallback(() => {
         window.chrome.webview.postMessage(JSON.stringify({ type: 'cancel' }));
+    }, []);
+
+    const handlePermissionRespond = useCallback((id, allowed) => {
+        window.chrome.webview.postMessage(JSON.stringify({
+            type: 'permission_response',
+            id: id,
+            allowed: allowed,
+        }));
     }, []);
 
     const handleSlashCommand = useCallback((cmd) => {
@@ -520,7 +570,7 @@ function App() {
             <div id="output" ref={outputRef}>
                 <Banner />
                 {messages.map((msg, i) => (
-                    <MessageEntry key={i} msg={msg} />
+                    <MessageEntry key={i} msg={msg} onPermissionRespond={handlePermissionRespond} />
                 ))}
             </div>
             <Loading visible={isLoading} onStop={handleStop} />

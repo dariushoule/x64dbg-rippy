@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <string>
 #include <vector>
+#include <map>
 #include <mutex>
 #include <atomic>
 #include <nlohmann/json.hpp>
@@ -40,6 +41,12 @@ private:
     std::atomic<bool> m_requestInFlight{false};
     std::atomic<bool> m_cancelRequested{false};
     bool m_webviewReady = false;
+
+    // Permission prompt system: background thread posts a request,
+    // frontend shows inline Allow/Deny, response signals the event.
+    struct PermissionRequest { HANDLE hEvent; bool allowed; };
+    std::map<std::string, PermissionRequest> m_pendingPermissions;
+    std::mutex m_permMutex;
 
     void initWebView2(HWND hwnd);
     void onWebMessage(const std::wstring& jsonMsg);

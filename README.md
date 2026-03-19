@@ -9,6 +9,7 @@ AI reverse engineering assistant for [x64dbg](https://x64dbg.com). Embeds a chat
 ### 1. Prerequisites
 
 - [x64dbg](https://x64dbg.com) (snapshot 2025-08-19 or newer)
+- [Latest Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist) (x64 and/or x86 to match your x64dbg)
 - [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (usually already installed on Windows 10/11)
 - An API key from [Anthropic](https://console.anthropic.com/) or an OpenAI-compatible provider
 

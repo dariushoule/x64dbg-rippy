@@ -666,6 +666,18 @@ void ChatPanel::onWebMessage(const std::wstring& jsonMsg)
                 postToJS(loadingMsg.dump());
             }
         }
+        else if (type == "permission_response")
+        {
+            std::string reqId = msg.value("id", "");
+            bool allowed = msg.value("allowed", false);
+            std::lock_guard<std::mutex> lock(m_permMutex);
+            auto it = m_pendingPermissions.find(reqId);
+            if (it != m_pendingPermissions.end())
+            {
+                it->second.allowed = allowed;
+                SetEvent(it->second.hEvent);
+            }
+        }
         else if (type == "save_conversation")
         {
             saveConversation();
@@ -904,27 +916,64 @@ void ChatPanel::sendChatAsync()
                 json toolResults = json::array();
                 for (const auto& tc : calls)
                 {
+                    // Permission gate for filesystem tools — ask user inline
+                    bool needsPermission = (tc.name == "read_file" || tc.name == "list_directory");
+                    if (needsPermission)
+                    {
+                        std::string path = tc.input.value("path", "");
+                        std::string action = (tc.name == "read_file") ? "read" : "list";
+                        std::string reqId = tc.id;
+
+                        HANDLE hPermEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+                        {
+                            std::lock_guard<std::mutex> lock(m_permMutex);
+                            m_pendingPermissions[reqId] = {hPermEvent, false};
+                        }
+
+                        // Post permission prompt to frontend
+                        auto* jsMsg = new std::string(json({
+                            {"type", "permission_request"},
+                            {"id", reqId},
+                            {"action", action},
+                            {"path", path}
+                        }).dump());
+                        GuiExecuteOnGuiThreadEx([](void* ud) {
+                            auto* s = static_cast<std::string*>(ud);
+                            if (g_chatPanel) g_chatPanel->postToJS(*s);
+                            delete s;
+                        }, jsMsg);
+
+                        WaitForSingleObject(hPermEvent, 60000); // 60s timeout
+
+                        bool allowed = false;
+                        {
+                            std::lock_guard<std::mutex> lock(m_permMutex);
+                            auto it = m_pendingPermissions.find(reqId);
+                            if (it != m_pendingPermissions.end())
+                            {
+                                allowed = it->second.allowed;
+                                m_pendingPermissions.erase(it);
+                            }
+                        }
+                        CloseHandle(hPermEvent);
+
+                        if (!allowed)
+                        {
+                            toolResults.push_back({
+                                {"type", "tool_result"},
+                                {"tool_use_id", tc.id},
+                                {"content", json({{"error", "user denied file access"}}).dump()}
+                            });
+                            continue;
+                        }
+                    }
+
                     auto* ctx = new ToolExecCtx{tc.name, tc.input, {}, true, CreateEvent(nullptr, FALSE, FALSE, nullptr)};
 
                     GuiExecuteOnGuiThreadEx([](void* ud) {
                         auto* c = static_cast<ToolExecCtx*>(ud);
                         try
                         {
-                            // Permission gate for filesystem tools
-                            if (c->name == "read_file" || c->name == "list_directory")
-                            {
-                                std::string path = c->input.value("path", "");
-                                std::string action = (c->name == "read_file") ? "read file" : "list directory";
-                                std::string msg = "rippy wants to " + action + ":\n\n" + path + "\n\nAllow?";
-                                int ret = MessageBoxA(nullptr, msg.c_str(), "rippy - file access", MB_YESNO | MB_ICONQUESTION | MB_TOPMOST);
-                                if (ret != IDYES)
-                                {
-                                    c->result = {{"error", "user denied file access"}};
-                                    c->permitted = false;
-                                    SetEvent(c->hEvent);
-                                    return;
-                                }
-                            }
                             c->result = executeTool(c->name, c->input);
                         }
                         catch (const std::exception& e)

@@ -149,7 +149,7 @@ body, #app {
 }
 
 #input::placeholder {
-    color: #555;
+    color: #666;
 }
 
 /* Slash command menu */
@@ -264,6 +264,55 @@ body, #app {
 }
 
 .tool-call-result-preview:hover { color: #777; }
+
+/* Permission prompts */
+
+.permission-prompt {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 4px 0;
+    color: #dcdcaa;
+}
+
+.permission-text {
+    flex: 1;
+}
+
+.permission-text strong {
+    color: #d4d4d4;
+    word-break: break-all;
+}
+
+.permission-buttons {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.permission-allow {
+    color: #55ff55;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.permission-allow:hover { color: #88ff88; }
+
+.permission-deny {
+    color: #f48771;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.permission-deny:hover { color: #ff6b5b; }
+
+.permission-resolved {
+    color: #666;
+    font-size: 12px;
+}
+
+.permission-resolved.allowed { color: #5a8a5a; }
+.permission-resolved.denied { color: #8a5a5a; }
 
 /* Scrollbar */
 
